@@ -13,50 +13,45 @@ function clamp(v, lo, hi) {
 }
 
 // Trust score: 100 base, −2 per warn, −8 per fail, +1 per pass (capped)
-function computeTrust(agentId) {
-  const audits = store.audits.filter((a) => a.agentId === agentId)
-  let score = 78
-  audits.forEach((a) => {
-    if (a.verdict === 'pass') score += 1
-    else if (a.verdict === 'warn') score -= 2
-    else score -= 8
-  })
-  return Math.round(clamp(score, 20, 99) * 10) / 10
+function auditScore(audits) {
+  if (!audits.length) return 0
+  return Math.round(audits.reduce((sum, a) => sum + ({ pass: 100, warn: 50, fail: 0 }[a.verdict] || 0), 0) / audits.length * 10) / 10
 }
+function computeTrust(agentId) { return auditScore(store.audits.filter((a) => a.agentId === agentId)) }
 
 function computeCompletion(agentId) {
   const ex = store.executions.filter((e) => e.agentId === agentId)
-  if (ex.length === 0) return 95
+  if (ex.length === 0) return 0
   const ok = ex.filter((e) => e.success).length
   return Math.round((ok / ex.length) * 1000) / 10
 }
 
 function computeLatency(agentId) {
   const ex = store.executions.filter((e) => e.agentId === agentId)
-  if (ex.length === 0) return 400
+  if (ex.length === 0) return 0
   const avg = ex.reduce((s, e) => s + e.latencyMs, 0) / ex.length
   return Math.round(avg)
 }
 
 function computeP95(agentId) {
   const ex = store.executions.filter((e) => e.agentId === agentId).map((e) => e.latencyMs).sort((a, b) => a - b)
-  if (ex.length === 0) return 800
-  return ex[Math.floor(ex.length * 0.95)]
+  if (ex.length === 0) return 0
+  return ex[Math.max(0, Math.ceil(ex.length * 0.95) - 1)]
 }
 
 function computeRetention(agentId) {
   // Proxy: share of executions in the last 7 days vs total
   const ex = store.executions.filter((e) => e.agentId === agentId)
-  if (ex.length === 0) return 90
+  if (ex.length === 0) return 0
   const recent = ex.filter((e) => e.ts > Date.now() - 7 * DAY).length
-  return Math.round(clamp((recent / ex.length) * 100 + 55, 40, 99) * 10) / 10
+  return Math.round((recent / ex.length) * 100 * 10) / 10
 }
 
 function computeUptime(agentId) {
   const ex = store.executions.filter((e) => e.agentId === agentId)
-  if (ex.length === 0) return 99
+  if (ex.length === 0) return 0
   const ok = ex.filter((e) => e.success).length
-  return Math.round(clamp(90 + (ok / ex.length) * 9, 85, 99.9) * 10) / 10
+  return Math.round((ok / ex.length) * 100 * 10) / 10
 }
 
 function computeStatus(agentId) {
@@ -64,8 +59,9 @@ function computeStatus(agentId) {
   const completion = computeCompletion(agentId)
   const recent = store.executions.filter((e) => e.agentId === agentId && e.ts > Date.now() - 24 * 3600000)
   const recentFail = recent.filter((e) => !e.success).length
-  if (trust < 55 || recentFail >= 3) return 'stalled'
-  if (trust < 70 || completion < 80 || recentFail >= 1) return 'degraded'
+  const audited = store.audits.some((a) => a.agentId === agentId)
+  if ((audited && trust < 55) || recentFail >= 3) return 'stalled'
+  if ((audited && trust < 70) || (recent.length && completion < 80) || recentFail >= 1) return 'degraded'
   if (recent.length === 0) return 'idle'
   return 'active'
 }
@@ -100,7 +96,7 @@ function computeSocial(agentId) {
 // Latency → health: 0-100 index, higher is better (sub-second ≈ 95+).
 function computeLatencyHealth(agentId) {
   const ex = store.executions.filter((e) => e.agentId === agentId)
-  if (ex.length === 0) return 87
+  if (ex.length === 0) return 0
   const avg = ex.reduce((s, e) => s + e.latencyMs, 0) / ex.length
   return Math.round(clamp(100 - avg / 30, 10, 98) * 10) / 10
 }
@@ -133,25 +129,20 @@ function computeReputation(agentId) {
 // 30-day history series for charts
 function computeHistory(agentId, metric) {
   const now = Date.now()
-  const out = []
-  for (let day = 29; day >= 0; day--) {
+  return Array.from({ length: 30 }, (_, i) => {
+    const day = 29 - i
     const start = now - (day + 1) * DAY
     const end = now - day * DAY
-    const ex = store.executions.filter((e) => e.agentId === agentId && e.ts >= start && e.ts < end)
-    let value
-    if (metric === 'trust') {
-      const audits = store.audits.filter((a) => a.agentId === agentId && a.ts >= start && a.ts < end)
-      value = 78 + audits.reduce((s, a) => s + (a.verdict === 'pass' ? 1 : a.verdict === 'warn' ? -2 : -8), 0)
-      value = clamp(value, 20, 99)
-    } else if (metric === 'completion') {
-      value = ex.length ? (ex.filter((e) => e.success).length / ex.length) * 100 : 95
-    } else {
-      // response (inverted health index 0-100)
-      value = ex.length ? clamp(100 - ex.reduce((s, e) => s + e.latencyMs, 0) / ex.length / 30, 10, 98) : 70
-    }
-    out.push({ day: `D-${day}`, value: Math.round(value * 10) / 10 })
-  }
-  return out
+    const ex = store.executions.filter((e) => e.agentId === agentId && e.ts >= start && e.ts <= end)
+    const audits = store.audits.filter((a) => a.agentId === agentId && a.ts <= end)
+    const completed = ex.filter((e) => e.success).length
+    const value = metric === 'trust' ? (audits.length ? auditScore(audits) : null)
+      : metric === 'tasks' ? completed
+      : !ex.length ? null
+      : metric === 'completion' ? completed / ex.length * 100
+      : ex.reduce((sum, e) => sum + e.latencyMs, 0) / ex.length
+    return { day: 'D-' + day, value: value == null ? null : Math.round(value * 10) / 10, samples: metric === 'trust' ? audits.length : ex.length }
+  })
 }
 
 // 7x24 activity heatmap from execution timestamps
@@ -165,18 +156,13 @@ function computeHeatmap(agentId) {
     const dayIdx = (d.getDay() + 6) % 7 // Mon=0
     grid[dayIdx].hours[d.getHours()] += 1
   })
-  // Normalize to 0-100
-  const max = Math.max(1, ...grid.flatMap((g) => g.hours))
-  grid.forEach((g) => {
-    g.hours = g.hours.map((v) => Math.round((v / max) * 100))
-  })
   return grid
 }
 
 function computePeers(agentId) {
   const auditedBy = store.audits.filter((a) => a.agentId === agentId).map((a) => a.auditorId)
   const audited = store.audits.filter((a) => a.auditorId === agentId).map((a) => a.agentId)
-  return [...new Set([...auditedBy, ...audited])]
+  return [...new Set([...auditedBy, ...audited])].filter((id) => getAgent(id))
 }
 
 export function buildAgent(agent) {
@@ -186,12 +172,14 @@ export function buildAgent(agent) {
   const { score: reputationScore, pillars } = computeReputation(agent.id)
   return {
     ...agent,
+    pricePerTask: agent.pricePerTask ?? agent.price,
     trustScore,
     completionRate,
     avgResponseTime,
     retentionRate: computeRetention(agent.id),
     uptime: computeUptime(agent.id),
-    tasksCompleted: store.executions.filter((e) => e.agentId === agent.id).length,
+    tasksCompleted: store.executions.filter((e) => e.agentId === agent.id && e.success).length,
+    executionsCount: store.executions.filter((e) => e.agentId === agent.id).length,
     auditsReceived: store.audits.filter((a) => a.agentId === agent.id).length,
     status: computeStatus(agent.id),
     p95Latency: computeP95(agent.id),
@@ -205,6 +193,7 @@ export function buildAgent(agent) {
       trust: computeHistory(agent.id, 'trust'),
       completion: computeHistory(agent.id, 'completion'),
       response: computeHistory(agent.id, 'response'),
+      tasks: computeHistory(agent.id, 'tasks'),
     },
     heatmap: computeHeatmap(agent.id),
     peers: computePeers(agent.id),
@@ -220,7 +209,7 @@ export function buildSwarm(swarm) {
   const health = Math.round(
     members.reduce((s, a) => s + a.trustScore, 0) / members.length
   )
-  const throughput = members.reduce((s, a) => s + Math.round(a.tasksCompleted / 30), 0)
+  const throughput = store.executions.filter((e) => swarm.agents.includes(e.agentId) && e.success && e.ts > Date.now() - DAY).length
   return { ...swarm, health, throughput, members }
 }
 

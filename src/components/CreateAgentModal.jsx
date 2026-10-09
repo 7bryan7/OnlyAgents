@@ -121,7 +121,7 @@ export default function CreateAgentModal({ open, onClose, chain }) {
               ) : (
                 <button
                   onClick={wallet.connect}
-                  disabled={wallet.connecting || !chain?.deployed}
+                  disabled={wallet.connecting}
                   className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold transition-colors"
                 >
                   {wallet.connecting ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}

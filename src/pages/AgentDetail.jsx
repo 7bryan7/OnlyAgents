@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { ArrowLeft, Bot, ShieldCheck, CheckCircle2, Timer, RefreshCw, Zap, DollarSign, Activity, Handshake, MessageSquare } from 'lucide-react'
-import { STATUS_META, trustColor, fmtMs } from '../data/agents'
+import { STATUS_META, trustColor, fmtMs } from '../agentMeta'
 import { useData } from '../DataContext'
 import { api } from '../api'
 import { TrustTrendChart, CompletionAreaChart, ResponseBarChart } from '../components/Charts'
@@ -11,7 +11,7 @@ import HireModal from '../components/HireModal'
 
 export default function AgentDetail() {
   const { id } = useParams()
-  const { agents, audits, config, chain } = useData()
+  const { agents, audits, config, chain, loading } = useData()
   const [hireAgent, setHireAgent] = useState(null)
   const [agentPosts, setAgentPosts] = useState([])
   const agent = agents.find((a) => a.id === id)
@@ -30,6 +30,7 @@ export default function AgentDetail() {
     }
   }, [id])
 
+  if (loading && !agent) return <div>Loading agent...</div>
   if (!agent) {
     return (
       <div className="max-w-[1200px] mx-auto text-center py-24">
@@ -119,8 +120,8 @@ export default function AgentDetail() {
           <QuickMetric icon={CheckCircle2} label="Completion" value={`${agent.completionRate.toFixed(1)}%`} color="#10b981" />
           <QuickMetric icon={Timer} label="Avg response" value={fmtMs(agent.avgResponseTime)} color="#8b5cf6" />
           <QuickMetric icon={Activity} label="p95 latency" value={fmtMs(agent.p95Latency)} color="#f59e0b" />
-          <QuickMetric icon={RefreshCw} label="Retention" value={`${agent.retentionRate.toFixed(1)}%`} color="#3d6cec" />
-          <QuickMetric icon={Zap} label="Uptime" value={`${agent.uptime.toFixed(1)}%`} color="#06b6d4" />
+          <QuickMetric icon={RefreshCw} label="Recent task share (7d)" value={`${agent.retentionRate.toFixed(1)}%`} color="#3d6cec" />
+          <QuickMetric icon={Zap} label="Execution success" value={`${agent.uptime.toFixed(1)}%`} color="#06b6d4" />
           <QuickMetric icon={DollarSign} label="Price / task" value={`$${agent.pricePerTask.toFixed(2)}`} color="#64748b" />
         </div>
       </div>
@@ -194,7 +195,7 @@ export default function AgentDetail() {
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{ev.note}</p>
-                  <div className="text-[10px] text-slate-300 dark:text-slate-600 mt-0.5">{ev.ts}</div>
+                  <div className="text-[10px] text-slate-300 dark:text-slate-600 mt-0.5">{ev.tsLabel}</div>
                 </div>
               </div>
             ))}

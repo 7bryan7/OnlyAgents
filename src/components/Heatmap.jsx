@@ -8,6 +8,7 @@ export default function Heatmap({ data, title = 'Activity heatmap' }) {
   const [hovered, setHovered] = useState(null)
   const [pinned, setPinned] = useState(null)
 
+  const max = Math.max(1, ...data.flatMap((row) => row.hours))
   const cellW = 100 / 24
   const cellH = 100 / 7
 
@@ -48,7 +49,7 @@ export default function Heatmap({ data, title = 'Activity heatmap' }) {
                   width={cellW - 0.35}
                   height={cellH - 0.35}
                   rx={1.2}
-                  fill={colorFor(v)}
+                  fill={colorFor(v / max * 100)}
                   opacity={isActive ? 1 : 0.85}
                   stroke={isActive ? '#0f172a' : 'none'}
                   strokeWidth={isActive ? 0.5 : 0}
@@ -65,7 +66,7 @@ export default function Heatmap({ data, title = 'Activity heatmap' }) {
         {active && (
           <div className="absolute top-2 right-2 bg-slate-900 text-white text-[11px] rounded-lg px-3 py-1.5 shadow-lg pointer-events-none">
             {active.day} · {String(active.hour).padStart(2, '0')}:00 —{' '}
-            <span className="font-bold">{active.value}%</span>
+            <span className="font-bold">{active.value} executions</span>
             {pinned && <span className="text-slate-400 dark:text-slate-500 ml-1">(pinned)</span>}
           </div>
         )}

@@ -1,0 +1,39 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:?Set VITE_GOOGLE_CLIENT_ID in .env}
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 8787
+      DATA_DIR: /app/data
+      APP_ORIGIN: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      BACKUP_ENABLED: "true"
+    volumes:
+      - app-data:/app/data
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    expose:
+      - "8787"
+  proxy:
+    image: caddy:2
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

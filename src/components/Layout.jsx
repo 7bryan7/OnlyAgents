@@ -12,6 +12,7 @@ const NAV = [
   { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/app/marketplace', label: 'Agent Marketplace', icon: Store },
   { to: '/app/feed', label: 'Social Feed', icon: MessageSquare },
+  { to: '/app/tasks', label: 'Task History', icon: ShieldCheck },
   { to: '/app/swarms', label: 'Swarm Network', icon: Network },
   { to: '/app/audits', label: 'Audit Ledger', icon: ShieldCheck },
   { to: '/app/connections', label: 'AI Models', icon: Cpu },
@@ -19,20 +20,20 @@ const NAV = [
 
 const MODE_META = {
   loading: { label: 'Connecting…', color: '#94a3b8', bg: '#f1f5f9', darkColor: '#94a3b8', darkBg: 'rgba(148,163,184,0.15)' },
-  simulated: { label: 'Simulated runtime', color: '#f59e0b', bg: '#fffbeb', darkColor: '#fbbf24', darkBg: 'rgba(245,158,11,0.15)' },
-  gemini: { label: 'Gemini live', color: '#10b981', bg: '#ecfdf5', darkColor: '#34d399', darkBg: 'rgba(16,185,129,0.15)' },
-  fallback: { label: 'Demo data (backend offline)', color: '#ef4444', bg: '#fef2f2', darkColor: '#f87171', darkBg: 'rgba(239,68,68,0.15)' },
-  offline: { label: 'Demo data', color: '#ef4444', bg: '#fef2f2', darkColor: '#f87171', darkBg: 'rgba(239,68,68,0.15)' },
+  unconfigured: { label: 'AI key required', color: '#f59e0b', bg: '#fffbeb', darkColor: '#fbbf24', darkBg: 'rgba(245,158,11,0.15)' },
+  gemini: { label: 'Gemini configured', color: '#10b981', bg: '#ecfdf5', darkColor: '#34d399', darkBg: 'rgba(16,185,129,0.15)' },
+  openai: { label: 'OpenAI configured', color: '#10b981', bg: '#ecfdf5', darkColor: '#34d399', darkBg: 'rgba(16,185,129,0.15)' },
+  offline: { label: 'Backend offline', color: '#ef4444', bg: '#fef2f2', darkColor: '#f87171', darkBg: 'rgba(239,68,68,0.15)' },
 }
 
 export default function Layout() {
-  const { mode, agents, swarms, auditTotal } = useData()
+  const { refresh, mode, agents, swarms, auditTotal } = useData()
   const { user, signOut } = useAuth()
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const isDark = theme === 'dark'
-  const meta = MODE_META[mode] || MODE_META.fallback
+  const meta = MODE_META[mode] || MODE_META.offline
   const badgeStyle = isDark
     ? { color: meta.darkColor, background: meta.darkBg }
     : { color: meta.color, background: meta.bg }
@@ -103,11 +104,11 @@ export default function Layout() {
               className="inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-3 py-1.5"
               style={badgeStyle}
               title={
-                mode === 'gemini'
-                  ? 'Runtime: real Gemini calls'
-                  : mode === 'simulated'
-                    ? 'Runtime: deterministic simulated fallback — not live AI output'
-                    : 'Runtime: demo data — backend offline'
+                ['gemini', 'openai'].includes(mode)
+                  ? `Runtime: real ${mode} calls`
+                  : mode === 'unconfigured'
+                    ? 'Configure the selected AI provider key in the server .env to run tasks'
+                    : 'Backend unavailable; no offline data is substituted'
               }
             >
               <span
@@ -153,7 +154,7 @@ export default function Layout() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-6 dark:bg-slate-950">
-          <Outlet />
+          {mode === 'offline' ? <div role="alert">Backend unavailable. Start the API and retry. <button onClick={refresh}>Retry</button></div> : <><p className="text-xs text-slate-500 mb-4">Metrics use recorded executions and peer audits. Zero means no evidence when history is empty.</p><Outlet /></>}
         </main>
       </div>
 

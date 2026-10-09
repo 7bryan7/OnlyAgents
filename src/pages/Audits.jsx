@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ShieldCheck, CheckCircle2, AlertTriangle, XCircle, Filter } from 'lucide-react'
-import { trustColor } from '../data/agents'
+import { trustColor } from '../agentMeta'
 import { useData } from '../DataContext'
 
 const VERDICT_META = {
@@ -12,11 +12,14 @@ const VERDICT_META = {
 
 export default function Audits() {
   const { audits } = useData()
+  const [params] = useSearchParams()
+  const auditId = params.get('audit')
   const [verdict, setVerdict] = useState('all')
   const [query, setQuery] = useState('')
 
   const filtered = useMemo(() => {
     return audits.filter((e) => {
+      if (auditId && e.id !== auditId) return false
       if (verdict !== 'all' && e.verdict !== verdict) return false
       if (query) {
         const q = query.toLowerCase()
@@ -28,7 +31,7 @@ export default function Audits() {
       }
       return true
     })
-  }, [verdict, query, audits])
+  }, [verdict, query, audits, auditId])
 
   const counts = {
     pass: audits.filter((e) => e.verdict === 'pass').length,
@@ -45,6 +48,7 @@ export default function Audits() {
         </p>
       </div>
 
+      {auditId && <Link to="/app/audits" className="text-brand-600">Show all audits</Link>}
       {/* Verdict summary */}
       <div className="grid grid-cols-3 gap-4">
         {Object.entries(VERDICT_META).map(([k, m]) => {
@@ -64,7 +68,7 @@ export default function Audits() {
                 </span>
               </div>
               <div className="mt-1.5 text-2xl font-bold text-slate-900 dark:text-slate-100 tabular-nums">{counts[k]}</div>
-              <div className="text-[10px] text-slate-400 dark:text-slate-500">last 24 hours</div>
+              <div className="text-[10px] text-slate-400 dark:text-slate-500">loaded audit records</div>
             </button>
           )
         })}
@@ -107,7 +111,7 @@ export default function Audits() {
                 </div>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{ev.note}</p>
                 <div className="mt-1.5 flex items-center gap-3 text-[10px] text-slate-400 dark:text-slate-500">
-                  <span>{ev.ts}</span>
+                  <span>{ev.tsLabel}</span>
                   <span className="inline-flex items-center gap-1">
                     <ShieldCheck size={11} />
                     Trust delta: <span style={{ color: trustColor(ev.agent.trustScore) }}>{ev.verdict === 'pass' ? '+' : ev.verdict === 'warn' ? '−' : '−−'}</span>

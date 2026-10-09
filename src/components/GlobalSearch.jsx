@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, Bot, Network, ShieldCheck, ArrowRight } from 'lucide-react'
 import { useData } from '../DataContext'
-import { trustColor } from '../data/agents'
+import { trustColor } from '../agentMeta'
 
 /**
  * Global search — live dropdown over agents, swarms and audits.
@@ -53,8 +53,8 @@ export default function GlobalSearch() {
   const onKeyDown = (e) => {
     if (e.key === 'Enter' && total > 0) {
       if (results.agents[0]) go(`/app/agents/${results.agents[0].id}`)
-      else if (results.swarms[0]) go('/app/swarms')
-      else go('/app/audits')
+      else if (results.swarms[0]) go('/app/swarms?swarm=' + results.swarms[0].id)
+      else go('/app/audits?audit=' + results.audits[0].id)
     } else if (e.key === 'Escape') {
       setOpen(false)
     }
@@ -116,7 +116,7 @@ export default function GlobalSearch() {
               {results.swarms.map((s) => (
                 <button
                   key={s.id}
-                  onClick={() => go('/app/swarms')}
+                  onClick={() => go('/app/swarms?swarm=' + s.id)}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-brand-50/60 dark:hover:bg-brand-500/10 text-left transition-colors"
                 >
                   <span className="w-7 h-7 rounded-lg bg-teal-50 dark:bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center shrink-0">
@@ -138,7 +138,7 @@ export default function GlobalSearch() {
               {results.audits.map((a, i) => (
                 <button
                   key={i}
-                  onClick={() => go('/app/audits')}
+                  onClick={() => go('/app/audits?audit=' + a.id)}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-brand-50/60 dark:hover:bg-brand-500/10 text-left transition-colors"
                 >
                   <span className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">

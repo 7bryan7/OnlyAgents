@@ -1,88 +1,21 @@
+import { useData } from '../DataContext'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Bell, ShieldCheck, TrendingDown, Rocket, CheckCircle2, Network,
-  AlertTriangle, CheckCheck, ArrowRight,
+  Bell, ShieldCheck, CheckCheck, ArrowRight,
 } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
-// Sample mock notifications. Read/unread state persists to localStorage so the
+// Notifications from recorded peer audits. Read/unread state persists so the
 // badge count survives reloads. Clicking a notification navigates to the
 // relevant page (audits / agents / swarms / dashboard).
 // ---------------------------------------------------------------------------
 
 const READ_KEY = 'oa_notifications_read'
 
-const MOCK_NOTIFICATIONS = [
-  {
-    id: 'n1',
-    type: 'audit',
-    icon: ShieldCheck,
-    color: '#10b981',
-    bg: '#ecfdf5',
-    title: 'Audit passed',
-    body: 'Leo Tanaka passed a peer audit on “Add feature-flag support to the build pipeline”.',
-    time: '2m ago',
-    to: '/app/audits',
-  },
-  {
-    id: 'n2',
-    type: 'trust',
-    icon: TrendingDown,
-    color: '#ef4444',
-    bg: '#fef2f2',
-    title: 'Trust alert',
-    body: 'Sofia Reyes dropped below your 60 threshold (now 58.4).',
-    time: '18m ago',
-    to: '/app/agents/ag-106',
-  },
-  {
-    id: 'n3',
-    type: 'task',
-    icon: CheckCircle2,
-    color: '#6366f1',
-    bg: '#eef2ff',
-    title: 'Task completed',
-    body: '“Triage 14 support tickets” finished in 3.2s with a pass verdict.',
-    time: '1h ago',
-    to: '/app/audits',
-  },
-  {
-    id: 'n4',
-    type: 'publish',
-    icon: Rocket,
-    color: '#8b5cf6',
-    bg: '#f5f3ff',
-    title: 'Agent published',
-    body: 'Priya Sharma is now live in the marketplace and routable.',
-    time: '3h ago',
-    to: '/app/marketplace',
-  },
-  {
-    id: 'n5',
-    type: 'swarm',
-    icon: Network,
-    color: '#0d9488',
-    bg: '#f0fdfa',
-    title: 'Swarm health',
-    body: 'Research & Insights swarm is healthy — 2/2 agents above 70 trust.',
-    time: '5h ago',
-    to: '/app/swarms',
-  },
-  {
-    id: 'n6',
-    type: 'system',
-    icon: AlertTriangle,
-    color: '#f59e0b',
-    bg: '#fffbeb',
-    title: 'Rate limit notice',
-    body: 'Gemini throttled a burst of tasks; retried automatically with backoff.',
-    time: 'Yesterday',
-    to: '/app',
-  },
-]
-
 export default function NotificationsPanel() {
+  const { audits } = useData()
+  const notifications = audits.slice(0, 20).map((a) => ({ id: a.id, icon: ShieldCheck, color: '#3d6cec', bg: '#eef2ff', title: 'Audit: ' + a.verdict, body: a.agent.name + ': ' + a.note, time: a.tsLabel, to: '/app/audits?audit=' + a.id }))
   const [open, setOpen] = useState(false)
   const [read, setRead] = useState(() => {
     try {
@@ -106,9 +39,9 @@ export default function NotificationsPanel() {
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
 
-  const unread = MOCK_NOTIFICATIONS.filter((n) => !read.has(n.id)).length
+  const unread = notifications.filter((n) => !read.has(n.id)).length
 
-  const markAllRead = () => setRead(new Set(MOCK_NOTIFICATIONS.map((n) => n.id)))
+  const markAllRead = () => setRead(new Set(notifications.map((n) => n.id)))
 
   const openNotification = (n) => {
     setRead((r) => new Set(r).add(n.id))
@@ -156,7 +89,7 @@ export default function NotificationsPanel() {
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y divide-slate-50 dark:divide-slate-800">
-            {MOCK_NOTIFICATIONS.map((n) => {
+            {notifications.map((n) => {
               const Icon = n.icon
               const isRead = read.has(n.id)
               return (
@@ -189,7 +122,7 @@ export default function NotificationsPanel() {
 
           <div className="px-4 py-2.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/60 text-center">
             <span className="text-[11px] text-slate-400 dark:text-slate-500">
-              Sample notifications — shown for demo purposes
+              {notifications.length ? 'Recent peer audits' : 'No audits yet'}
             </span>
           </div>
         </div>

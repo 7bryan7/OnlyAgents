@@ -31,6 +31,7 @@ contract TaskEscrow is Ownable {
     }
 
     uint256 public taskCount;
+    uint256 public lockedBalance;
     mapping(uint256 => Task) public tasks;
 
     event TaskCreated(uint256 indexed taskId, address indexed consumer, address indexed agentOwner, uint256 amount);
@@ -51,6 +52,7 @@ contract TaskEscrow is Ownable {
         require(msg.value >= amount, "TaskEscrow: insufficient payment");
 
         taskId = ++taskCount;
+        lockedBalance += amount;
         tasks[taskId] = Task({
             consumer: msg.sender,
             agentOwner: agentOwner,
@@ -84,6 +86,7 @@ contract TaskEscrow is Ownable {
     ///         agent owner still gets paid (minus fee) so work is never stuck.
     function releaseTask(uint256 taskId) external {
         Task storage t = tasks[taskId];
+        require(t.consumer != address(0), "TaskEscrow: unknown task");
         require(!t.completed && !t.released, "TaskEscrow: already settled");
         require(block.timestamp >= t.createdAt + timeout, "TaskEscrow: not yet expired");
 
@@ -92,6 +95,7 @@ contract TaskEscrow is Ownable {
     }
 
     function _settle(uint256 taskId, Task storage t) internal {
+        lockedBalance -= t.amount;
         uint256 fee = (t.amount * FEE_BPS) / BPS;
         uint256 payout = t.amount - fee;
 
@@ -119,7 +123,7 @@ contract TaskEscrow is Ownable {
 
     /// @notice Withdraw any accidental direct ETH sent to the contract.
     function withdraw() external onlyOwner {
-        (bool ok, ) = treasury.call{value: address(this).balance}("");
+        (bool ok, ) = treasury.call{value: address(this).balance - lockedBalance}("");
         require(ok, "TaskEscrow: withdraw failed");
     }
 }

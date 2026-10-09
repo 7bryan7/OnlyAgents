@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, forceX, forceY } from 'd3-force'
-import { trustColor, STATUS_META } from '../data/agents'
+import { trustColor, STATUS_META } from '../agentMeta'
 import { useData } from '../DataContext'
 import { useNavigate } from 'react-router-dom'
 

@@ -12,7 +12,7 @@ import {
   Cell,
 } from 'recharts'
 import { useContainerWidth } from '../hooks/useContainerWidth'
-import { trustColor } from '../data/agents'
+import { trustColor } from '../agentMeta'
 
 const AXIS_TICK = { fontSize: 10, fill: '#94a3b8' }
 

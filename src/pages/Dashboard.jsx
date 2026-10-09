@@ -1,3 +1,4 @@
+import { fleetHistory, periodValue, periodChange } from '../fleetMetrics'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -9,7 +10,7 @@ import Heatmap from '../components/Heatmap'
 import NetworkGraph from '../components/NetworkGraph'
 import TaskRunner from '../components/TaskRunner'
 import { TrustTrendChart, CompletionAreaChart, ResponseBarChart, TrustDistributionChart } from '../components/Charts'
-import { STATUS_META, trustColor } from '../data/agents'
+import { STATUS_META, trustColor } from '../agentMeta'
 import { useData } from '../DataContext'
 
 export default function Dashboard() {
@@ -33,7 +34,13 @@ export default function Dashboard() {
     return <div className="text-center py-24 text-slate-400 dark:text-slate-500 text-sm">Loading reputation data…</div>
   }
 
-  const spark = agents[0].history.trust.map((d) => d.value)
+  const days = timeRange === '24h' ? 1 : timeRange === '7d' ? 7 : 30
+  const history = Object.fromEntries(['trust', 'completion', 'response', 'tasks'].map((metric) => [metric, fleetHistory(agents, metric)]))
+  const period = Object.fromEntries(Object.entries(history).map(([key, values]) => [key, values.slice(-days)]))
+  const value = (key) => periodValue(period[key], key)
+  const display = (key, divisor = 1) => value(key) == null ? 'No data' : (value(key) / divisor).toFixed(1)
+  const spark = period.trust.map((p) => p.value)
+  const heatmap = agents[0].heatmap.map((row, i) => ({ day: row.day, hours: row.hours.map((_, h) => agents.reduce((sum, a) => sum + a.heatmap[i].hours[h], 0)) }))
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
@@ -42,7 +49,7 @@ export default function Dashboard() {
         <div>
           <h1 className="font-sora text-2xl font-bold text-slate-900 dark:text-slate-100">Reputation Overview</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Live trust, completion and latency signals across {agents.length} audited agents.
+            Recorded task and peer-review metrics across {agents.length} configured agents.
           </p>
         </div>
         <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-1">
@@ -64,41 +71,42 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KpiCard
           title="Avg Trust Score"
-          value={stats.avgTrust.toFixed(1)}
+          value={display('trust')}
           unit="/100"
-          delta={4.2}
-          deltaLabel="vs last week"
+          delta={periodChange(history.trust, 'trust', days)}
+          deltaLabel="vs previous period"
           spark={spark}
           icon={ShieldCheck}
           accent="#3d6cec"
         />
         <KpiCard
           title="Avg Completion"
-          value={stats.avgCompletion.toFixed(1)}
+          value={display('completion')}
           unit="%"
-          delta={1.8}
-          deltaLabel="vs last week"
-          spark={agents[1].history.completion.map((d) => d.value)}
+          delta={periodChange(history.completion, 'completion', days)}
+          deltaLabel="vs previous period"
+          spark={period.completion.map((d) => d.value)}
           icon={CheckCircle2}
           accent="#10b981"
         />
         <KpiCard
           title="Avg Response"
-          value={(stats.avgResp / 1000).toFixed(2)}
+          lowerIsBetter
+          value={display('response', 1000)}
           unit="s"
-          delta={-6.5}
-          deltaLabel="faster than last week"
-          spark={agents[2].history.response.map((d) => d.value)}
+          delta={periodChange(history.response, 'response', days)}
+          deltaLabel="vs previous period"
+          spark={period.response.map((d) => d.value)}
           icon={Timer}
           accent="#8b5cf6"
         />
         <KpiCard
           title="Tasks Completed"
-          value={stats.totalTasks.toLocaleString()}
+          value={value('tasks').toLocaleString()}
           unit=""
-          delta={12.4}
-          deltaLabel="vs last week"
-          spark={agents[3].history.completion.map((d) => d.value)}
+          delta={periodChange(history.tasks, 'tasks', days)}
+          deltaLabel="vs previous period"
+          spark={period.tasks.map((d) => d.value)}
           icon={RefreshCw}
           accent="#f59e0b"
         />
@@ -125,23 +133,23 @@ export default function Dashboard() {
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Trust trend — fleet average</h3>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">30 days</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500">{timeRange}</span>
           </div>
-          <TrustTrendChart data={agents[0].history.trust} />
+          <TrustTrendChart data={period.trust} />
         </div>
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Completion rate — fleet average</h3>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">30 days</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500">{timeRange}</span>
           </div>
-          <CompletionAreaChart data={agents[1].history.completion} />
+          <CompletionAreaChart data={period.completion} />
         </div>
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Response time — fleet average</h3>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">30 days</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500">{timeRange}</span>
           </div>
-          <ResponseBarChart data={agents[2].history.response} />
+          <ResponseBarChart data={period.response} />
         </div>
       </div>
 
@@ -158,7 +166,7 @@ export default function Dashboard() {
         </div>
         <div className="xl:col-span-2 space-y-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-            <Heatmap data={agents[0].heatmap} title="Fleet activity — 7 days × 24h" />
+            <Heatmap data={heatmap} title="Fleet activity — 7 days × 24h" />
           </div>
           <TaskRunner />
         </div>
@@ -227,7 +235,7 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{ev.note}</div>
-                  <div className="text-[10px] text-slate-300 dark:text-slate-600">{ev.ts}</div>
+                  <div className="text-[10px] text-slate-300 dark:text-slate-600">{ev.tsLabel}</div>
                 </div>
               </div>
             ))}

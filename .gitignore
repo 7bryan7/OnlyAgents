@@ -18,7 +18,7 @@ dist-ssr
 !.env.example
 
 # Runtime data (real execution/audit records)
-data/
+/data/
 
 # Editor directories and files
 .vscode/*
@@ -30,3 +30,7 @@ data/
 *.njsproj
 *.sln
 *.sw?
+
+/test-results/
+/playwright-report/
+/.hardhat/

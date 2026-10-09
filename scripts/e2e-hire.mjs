@@ -15,6 +15,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { baseSepolia } from 'viem/chains'
 
 const API = process.env.API_URL || 'http://localhost:8787'
+const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.GOOGLE_ID_TOKEN || ''}` }
 const deployed = JSON.parse(readFileSync(new URL('../deployed.json', import.meta.url), 'utf8'))
 const escrow = deployed.taskEscrow
 const treasury = deployed.treasury
@@ -33,6 +34,13 @@ const AMOUNT_ETH = 0.001
 const TASK_TEXT = 'E2E test: summarize the escrow flow in three bullet points.'
 
 async function main() {
+  // Validate the session and eligibility before spending any testnet ETH.
+  const me = await fetch(`${API}/api/auth/me`, { headers })
+  if (!me.ok) throw new Error('Set GOOGLE_ID_TOKEN to a current signed-in Google ID token')
+  const health = await (await fetch(`${API}/api/health`)).json()
+  if (health.mode !== 'gemini') throw new Error('Configure Gemini before creating an escrow')
+  const agentResponse = await fetch(`${API}/api/agents/ag-102`, { headers })
+  if (!agentResponse.ok || !(await agentResponse.json()).agent.hireable) throw new Error('Agent ag-102 must be hireable before creating an escrow')
   console.log('consumer :', account.address)
   console.log('escrow   :', escrow)
   console.log('treasury :', treasury)
@@ -55,7 +63,7 @@ async function main() {
   console.log('[2/4] POST /api/tasks/hire (backend verifies on-chain)…')
   const hireRes = await fetch(`${API}/api/tasks/hire`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       task: TASK_TEXT,
       agentId: 'ag-102',
@@ -70,6 +78,7 @@ async function main() {
     process.exitCode = 1
     return
   }
+  if (!hire.execution.success) throw new Error('Execution failed; payment has not been confirmed: ' + hire.execution.output)
   console.log('      task id :', hire.task.id, `(${hire.task.status})`)
   console.log('      escrow  : task #', hire.escrow.taskId, '· payout', hire.escrow.payoutEth, '· fee', hire.escrow.feeEth)
   console.log('      agent   :', hire.execution.agent.name, '·', hire.execution.latencyMs, 'ms')
@@ -91,7 +100,7 @@ async function main() {
   console.log('[4/4] POST /api/tasks/:id/confirm (backend verifies TaskPaid)…')
   const confirmRes = await fetch(`${API}/api/tasks/${hire.task.id}/confirm`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ txHash: completeHash }),
   })
   const confirm = await confirmRes.json()
@@ -105,7 +114,7 @@ async function main() {
   console.log('      fee    :', confirm.payout.feeEth, 'ETH → treasury')
 
   // 5. Treasury stats after
-  const treasuryRes = await fetch(`${API}/api/treasury`)
+  const treasuryRes = await fetch(`${API}/api/treasury`, { headers })
   const t = (await treasuryRes.json()).treasury
   console.log('\nTreasury now: tasksPaid', t.tasksPaid, '· taskFees', t.taskFeesEth, 'ETH · total', t.totalEth, 'ETH')
   console.log('\n✅ FULL ESCROW CYCLE PASSED')

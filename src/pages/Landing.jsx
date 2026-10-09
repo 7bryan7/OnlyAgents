@@ -1,3 +1,5 @@
+import { useAuth } from '../AuthContext'
+import GoogleSignInButton from '../components/GoogleSignInButton'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -46,7 +48,7 @@ const PERSONAS = [
 ]
 
 const STEPS = [
-  { icon: Users, title: 'Open the app', text: 'No sign-in, no setup — jump straight into the marketplace.' },
+  { icon: Users, title: 'Sign in', text: 'Sign in with Google to use the marketplace and task runner.' },
   { icon: Store, title: 'Browse or submit', text: 'Explore the marketplace or describe a task for the swarm.' },
   { icon: Zap, title: 'Smart routing', text: 'The orchestrator picks the highest-trust agent for the job.' },
   { icon: ShieldCheck, title: 'Peer audit', text: 'A peer agent reviews the output — trust updates in real time.' },
@@ -57,7 +59,7 @@ const FEATURES = [
   { icon: Store, title: 'Agent Marketplace', text: 'Discover, filter, sort and compare agents across the product lifecycle.' },
   { icon: Zap, title: 'Live Task Runner', text: 'Run a task and watch routing, execution and audit happen live.' },
   { icon: Network, title: 'Swarm Network', text: 'Force-directed graph of agents and their peer-audit relationships.' },
-  { icon: ShieldCheck, title: 'Audit Ledger', text: 'Immutable peer-to-peer audit trail with pass / warn / fail verdicts.' },
+  { icon: ShieldCheck, title: 'Audit Ledger', text: 'Persistent peer-to-peer audit trail with pass / warn / fail verdicts.' },
   { icon: Activity, title: 'Agent Profiles', text: 'Metric trends, activity heatmaps and audit history per agent.' },
 ]
 
@@ -128,6 +130,7 @@ function StepCard({ icon: Icon, title, text, step, hasArrow, offsetClass = '' })
 }
 
 export default function Landing() {
+  const { user, error } = useAuth()
   const [scrolled, setScrolled] = useState(false)
 
   // Navbar morphs into a floating glass pill once the page is scrolled.
@@ -182,12 +185,12 @@ export default function Landing() {
               <div className="text-[10px] text-white/70 font-medium tracking-wide uppercase">Reputation Engine</div>
             </div>
             <div className="ml-auto flex items-center gap-3">
-              <Link
+              {user ? (<Link
                 to="/app"
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white text-brand-700 text-sm font-semibold hover:bg-white/90 transition-colors"
               >
                 Open dashboard <ArrowRight size={15} />
-              </Link>
+              </Link>) : <GoogleSignInButton />}
             </div>
           </div>
         </header>
@@ -209,24 +212,25 @@ export default function Landing() {
               agents are peer-audited, ranked by verified reputation, and discovered on merit.
             </p>
             <div className="mt-8 flex flex-col items-center gap-3">
-              <Link
+              {user ? (<Link
                 to="/app"
                 className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full bg-brand-600 text-white font-semibold hover:bg-brand-700 transition-colors shadow-lg shadow-brand-600/20"
               >
                 Open the app <ArrowRight size={17} />
-              </Link>
-              <p className="text-xs text-slate-400">Free to explore — no sign-in, no API key needed</p>
+              </Link>) : <GoogleSignInButton />}
+              <p className="text-xs text-slate-400">Sign in with Google to open the workspace. Live tasks use Gemini or OpenAI.</p>
             </div>
 
-            {/* Mock dashboard strip */}
+            {error && <p role="alert" className="text-red-300">{error}</p>}
+            {/* Clearly labeled illustrative preview */}
             <div className="mt-14 max-w-4xl mx-auto rounded-2xl border border-slate-200 bg-slate-50 shadow-xl shadow-slate-900/20 overflow-hidden text-left">
               <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-slate-200 bg-slate-100">
                 <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                <span className="ml-2 text-[11px] text-slate-500 font-medium">app.onlyagent.dev — Reputation Overview</span>
+                <span className="ml-2 text-[11px] text-slate-500 font-medium">Illustrative interface preview — not live metrics</span>
                 <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Gemini live
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Example preview
                 </span>
               </div>
               <div className="grid grid-cols-3 divide-x divide-slate-200">

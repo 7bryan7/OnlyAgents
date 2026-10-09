@@ -41,11 +41,10 @@ export default function GlassGoogleButton({
 
   if (!clientId) {
     return (
-      <div
-        className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 text-slate-300 text-sm font-semibold border border-white/15 backdrop-blur-md ${buttonClassName}`}
-      >
-        <GoogleG />
-        Google sign-in not configured
+      <div role="status" className={`max-w-md rounded-xl border border-amber-300/30 bg-amber-400/10 px-4 py-3 text-left text-sm text-amber-100 backdrop-blur-md ${buttonClassName}`}>
+        <p className="font-semibold">Google sign-in not configured</p>
+        <p className="mt-1 leading-relaxed">Set <code>VITE_GOOGLE_CLIENT_ID</code> in <code>.env</code>, authorize <code>http://localhost:5173</code> in Google Cloud Console, then restart <code>npm run dev:all</code>.</p>
+        <a className="mt-2 inline-block font-semibold underline" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Open Google Cloud credentials</a>
       </div>
     )
   }

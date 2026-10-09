@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Play, ShieldCheck, Loader2, Bot, ArrowRight, CheckCircle2, AlertTriangle, XCircle, Zap } from 'lucide-react'
 import { useData } from '../DataContext'
-import { trustColor, LIFECYCLE_STAGES } from '../data/agents'
+import { trustColor, LIFECYCLE_STAGES } from '../agentMeta'
 
 const SUGGESTIONS = [
   'Implement dark mode toggle for settings page',
@@ -29,7 +29,7 @@ export default function TaskRunner() {
   const [error, setError] = useState(null)
 
   const execute = async () => {
-    if (!task.trim() || running) return
+    if (!task.trim() || running || auditing) return
     setRunning(true)
     setError(null)
     setResult(null)
@@ -37,6 +37,10 @@ export default function TaskRunner() {
     try {
       const r = await runTask(task.trim(), stage ? { stage } : {})
       setResult(r)
+      if (r.execution.success) {
+        setAuditing(true)
+        try { setAudit(await auditTask(r.task.id)) } catch (e) { setError(e.message) } finally { setAuditing(false) }
+      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -45,7 +49,8 @@ export default function TaskRunner() {
   }
 
   const auditNow = async () => {
-    if (!result || auditing) return
+    if (!result?.execution.success || auditing || audit) return
+    setError(null)
     setAuditing(true)
     try {
       const a = await auditTask(result.task.id)
@@ -65,7 +70,7 @@ export default function TaskRunner() {
         <Zap size={16} className="text-brand-600 dark:text-brand-400" />
         <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Live task runner</h3>
         <span className="ml-auto text-[10px] text-slate-400 dark:text-slate-500">
-          {mode === 'gemini' ? 'Gemini runtime' : mode === 'simulated' ? 'Simulated runtime' : 'Backend offline'}
+          {mode === 'gemini' ? 'Gemini runtime' : mode === 'openai' ? 'OpenAI runtime' : mode === 'unconfigured' ? 'AI key required' : 'Backend offline'}
         </span>
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
@@ -74,6 +79,7 @@ export default function TaskRunner() {
 
       <div className="flex gap-2">
         <input
+          maxLength={500}
           value={task}
           onChange={(e) => setTask(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && execute()}
@@ -93,7 +99,7 @@ export default function TaskRunner() {
         </select>
         <button
           onClick={execute}
-          disabled={busy || !task.trim()}
+          disabled={busy || !task.trim() || !['gemini', 'openai'].includes(mode)}
           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
@@ -114,7 +120,7 @@ export default function TaskRunner() {
       </div>
 
       {error && (
-        <div className="mt-3 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">{error}</div>
+        <div role="alert" className="mt-3 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">{error}</div>
       )}
 
       {result && (
@@ -140,7 +146,7 @@ export default function TaskRunner() {
           {!audit ? (
             <button
               onClick={auditNow}
-              disabled={auditing}
+              disabled={auditing || !result.execution.success}
               className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border-2 border-dashed border-brand-300 dark:border-brand-500/30 text-brand-700 dark:text-brand-300 text-sm font-semibold hover:bg-brand-50 dark:hover:bg-brand-500/10 disabled:opacity-40 transition-colors"
             >
               {auditing ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}

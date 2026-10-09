@@ -2,10 +2,10 @@
 // Live updates client — connects to the backend WebSocket (/ws) and notifies
 // subscribers of `{ type, resource, ts }` events. Auto-reconnects with backoff.
 // The REST API stays the source of truth: events only say *what* changed, the
-// caller re-fetches via api.js. Falls back silently to polling when offline.
+// caller re-fetches via api.js. Reconnection refreshes the current data.
 // ---------------------------------------------------------------------------
 
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8787'
+const BASE = import.meta.env.VITE_API_URL || window.location.origin
 
 const listeners = new Set()
 let socket = null

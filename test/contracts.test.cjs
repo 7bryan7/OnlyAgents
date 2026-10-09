@@ -82,6 +82,20 @@ describe('TaskEscrow', function () {
     await expect(escrow.connect(agentOwner).completeTask(1n)).to.be.revertedWith('TaskEscrow: not consumer')
   })
 
+  it('owner withdrawal preserves every open escrow', async function () {
+    const amount = ethers.parseEther('0.01')
+    await escrow.connect(consumer).createTask(agentOwner.address, amount, { value: amount })
+    await escrow.connect(consumer).withdraw()
+    expect(await ethers.provider.getBalance(await escrow.getAddress())).to.equal(amount)
+    expect(await escrow.lockedBalance()).to.equal(amount)
+    await escrow.connect(consumer).completeTask(1n)
+    expect(await escrow.lockedBalance()).to.equal(0n)
+  })
+
+  it('rejects release of nonexistent tasks', async function () {
+    await expect(escrow.releaseTask(999n)).to.be.revertedWith('TaskEscrow: unknown task')
+  })
+
   it('auto-releases after the timeout', async function () {
     const amount = ethers.parseEther('0.01')
     const fee = (amount * FEE_BPS) / BPS

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { Bot, CheckCircle2, AlertTriangle, XCircle, Clock, ArrowUpRight, Lock, BadgeCheck, Handshake } from 'lucide-react'
-import { STATUS_META, trustColor, fmtMs } from '../data/agents'
+import { STATUS_META, trustColor, fmtMs } from '../agentMeta'
 import { useData } from '../DataContext'
 
 const STATUS_ICON = {
@@ -17,7 +17,7 @@ export default function AgentCard({ agent, compact = false, onHireClick }) {
   const meta = STATUS_META[agent.status]
   const threshold = config.hireThreshold
   const gap = Math.max(0, threshold - agent.reputationScore)
-  const progress = Math.min(100, (agent.reputationScore / threshold) * 100)
+  const progress = Math.min(100, threshold > 0 ? (agent.reputationScore / threshold) * 100 : 100)
 
   const handleHireClick = (e) => {
     e.stopPropagation()

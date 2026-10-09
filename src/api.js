@@ -1,43 +1,57 @@
 // ---------------------------------------------------------------------------
 // API client — talks to the Express backend.
-// Every call falls back to the bundled fake data if the backend is unreachable,
-// so the UI never breaks during a demo.
+// Offline requests return empty collections with an explicit offline status.
 // ---------------------------------------------------------------------------
 
-import { AGENTS as FAKE_AGENTS, SWARMS as FAKE_SWARMS, AUDIT_LOG as FAKE_AUDITS } from './data/agents'
 
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8787'
+function headers() { return { 'Content-Type': 'application/json', 'X-Requested-With': 'OnlyAgent' } }
+function checkAuth(res) { if (res.status === 401) window.dispatchEvent(new Event('oa:unauthorized')) }
+const BASE = import.meta.env.VITE_API_URL || ''
+
+async function readJson(res) {
+  const body = await res.text()
+  if (!body.trim()) {
+    throw new Error(`The API returned an empty response (HTTP ${res.status}). Check that VITE_API_URL points to the backend.`)
+  }
+  try {
+    return JSON.parse(body)
+  } catch {
+    throw new Error(`The API returned an invalid response (HTTP ${res.status}). Check that VITE_API_URL points to the backend.`)
+  }
+}
 
 async function get(path) {
-  const res = await fetch(`${BASE}${path}`)
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+  const res = await fetch(`${BASE}${path}`, { headers: headers(), credentials: 'include' })
+  checkAuth(res)
+  const data = await readJson(res)
+  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`)
+  return data
 }
 
 async function post(path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    headers: headers(),
     body: JSON.stringify(body || {}),
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `${res.status} ${res.statusText}`)
-  }
-  return res.json()
+  checkAuth(res)
+  const data = await readJson(res)
+  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`)
+  return data
 }
 
 async function put(path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    headers: headers(),
     body: JSON.stringify(body || {}),
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `${res.status} ${res.statusText}`)
-  }
-  return res.json()
+  checkAuth(res)
+  const data = await readJson(res)
+  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`)
+  return data
 }
 
 // Default reputation protocol config (mirrors server defaults)
@@ -47,6 +61,14 @@ export const DEFAULT_CONFIG = {
 }
 
 export const api = {
+  runtime() { return get('/api/runtime') },
+  updateRuntime(body) { return put('/api/runtime', body) },
+  checkRuntime() { return post('/api/runtime/check') },
+  usage() { return get('/api/usage') },
+  walletStatus() { return get('/api/wallet') },
+  walletChallenge(walletAddress) { return post('/api/wallet/challenge', { walletAddress }) },
+  verifyWallet(walletAddress, signature) { return post('/api/wallet/verify', { walletAddress, signature }) },
+  async events() { return get('/api/events') },
   async health() {
     try {
       return await get('/api/health')
@@ -60,7 +82,7 @@ export const api = {
       const d = await get('/api/agents')
       return { agents: d.agents, mode: d.mode, live: true }
     } catch {
-      return { agents: FAKE_AGENTS, mode: 'fallback', live: false }
+      return { agents: [], mode: 'offline', live: false }
     }
   },
 
@@ -69,7 +91,7 @@ export const api = {
       const d = await get('/api/swarms')
       return { swarms: d.swarms, live: true }
     } catch {
-      return { swarms: FAKE_SWARMS, live: false }
+      return { swarms: [], live: false }
     }
   },
 
@@ -78,7 +100,7 @@ export const api = {
       const d = await get('/api/audits')
       return { audits: d.audits, total: d.total, live: true }
     } catch {
-      return { audits: FAKE_AUDITS, total: FAKE_AUDITS.length, live: false }
+      return { audits: [], total: 0, live: false }
     }
   },
 
@@ -89,6 +111,8 @@ export const api = {
   async auditTask(taskId, opts = {}) {
     return post(`/api/tasks/${taskId}/audit`, opts)
   },
+  retryTask(taskId) { return post(`/api/tasks/${taskId}/retry`) },
+  task(taskId) { return get(`/api/tasks/${taskId}`) },
 
   async config() {
     try {

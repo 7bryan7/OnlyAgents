@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X, Wallet, Loader2, CheckCircle2, ShieldCheck, ArrowRight, Lock, Handshake, Bot } from 'lucide-react'
 import { useWallet } from '../hooks/useWallet'
 import { useData } from '../DataContext'
+import { api } from '../api'
 
 const SUGGESTIONS = [
   'Write a launch post for the new dashboard',
@@ -15,11 +16,11 @@ const SUGGESTIONS = [
 const FEE_BPS = 700
 
 function fmtEth(v) {
-  return `${Number(v).toFixed(4)} ETH`
+  return `${Number(v).toFixed(6)} ETH`
 }
 
 export default function HireModal({ agent, chain, open, onClose }) {
-  const { hireTask, confirmTask } = useData()
+  const { hireTask, confirmTask, mode } = useData()
   const wallet = useWallet()
   const [step, setStep] = useState('form') // form → pay → executing → confirm → done
   const [task, setTask] = useState('')
@@ -34,8 +35,8 @@ export default function HireModal({ agent, chain, open, onClose }) {
 
   const escrowAddress = chain?.taskEscrow
   const amountNum = Number(amount)
-  const fee = Math.round(amountNum * FEE_BPS) / 10000
-  const payoutEth = Math.round((amountNum - fee) * 10000) / 10000
+  const fee = amountNum * FEE_BPS / 10000
+  const payoutEth = amountNum - fee
   const platformOwned = !agent.ownerId
 
   const reset = () => {
@@ -50,18 +51,21 @@ export default function HireModal({ agent, chain, open, onClose }) {
   }
 
   const close = () => {
+    if (busy) return
     reset()
     onClose()
   }
 
   const payAndHire = async () => {
-    if (!task.trim() || !(amountNum > 0)) return
+    if (!task.trim() || !(amountNum > 0) || busy) return
+    if (!['gemini', 'openai'].includes(mode)) { setError('Configure an AI provider before locking any payment.'); return }
     setBusy(true)
     setError('')
     try {
       if (!wallet.address) {
         const addr = await wallet.connect()
-        if (!addr) return
+        if (addr) setError('Wallet connected. Review the task, then click hire again.')
+        return
       }
       if (!escrowAddress) {
         setError('TaskEscrow not deployed yet — hiring is disabled until contracts are on-chain.')
@@ -69,7 +73,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
       }
       const agentOwner = agent.walletAddress || chain?.treasury
       setStep('pay')
-      const hash = await wallet.createEscrowTask({ escrowAddress, agentOwner, amountEth: amountNum })
+      const hash = txHash || await wallet.createEscrowTask({ escrowAddress, agentOwner, amountEth: amountNum })
       if (!hash) {
         setError(wallet.error || 'Escrow transaction failed')
         setStep('form')
@@ -85,7 +89,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
         walletAddress: wallet.address,
       })
       setResult(r)
-      setStep('confirm')
+      if (!r.execution.success) { setError(r.execution.output); setStep('failed') } else setStep('confirm')
     } catch (e) {
       setError(e.message)
       setStep('form')
@@ -95,7 +99,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
   }
 
   const confirmAndRelease = async () => {
-    if (!result) return
+    if (!result || busy) return
     setBusy(true)
     setError('')
     try {
@@ -232,6 +236,19 @@ export default function HireModal({ agent, chain, open, onClose }) {
           )}
 
           {/* Step 4 — confirm */}
+          {step === 'failed' && result && <div className="space-y-3 text-sm">
+            <p>Execution failed. The existing escrow remains associated with this task.</p>
+            <button disabled={busy} className="w-full rounded-lg bg-brand-600 py-3 text-white disabled:opacity-40" onClick={async () => {
+              setBusy(true); setError('')
+              try {
+                const retry = await api.retryTask(result.task.id)
+                setResult({ ...result, ...retry })
+                if (retry.execution.success) setStep('confirm')
+                else setError(retry.execution.output)
+              } catch (e) { setError(e.message) } finally { setBusy(false) }
+            }}>{busy ? 'Retrying…' : 'Retry execution without another payment'}</button>
+            <a className="text-brand-600" href="/app/tasks">Open task history</a>
+          </div>}
           {step === 'confirm' && result && (
             <>
               <div className="rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-500/5 p-4 space-y-2">

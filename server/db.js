@@ -1,3 +1,5 @@
+import './env.js'
+import { resolve } from 'node:path'
 // ---------------------------------------------------------------------------
 // SQLite persistence layer (PRD v2 §6.4 — "replace the flat JSON file with a
 // real database; SQLite is enough for a hackathon").
@@ -11,12 +13,11 @@
 // ---------------------------------------------------------------------------
 
 import Database from 'better-sqlite3'
-import { mkdirSync, existsSync, readFileSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const DATA_DIR = fileURLToPath(new URL('../data', import.meta.url))
+const DATA_DIR = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : fileURLToPath(new URL('../data', import.meta.url))
 const DB_FILE = `${DATA_DIR}/store.db`
-const LEGACY_FILE = `${DATA_DIR}/store.json`
 
 mkdirSync(DATA_DIR, { recursive: true })
 
@@ -145,6 +146,38 @@ ensureColumn('tasks', 'paidAt', 'paidAt INTEGER')
 // ---------------------------------------------------------------------------
 // Collection load/save
 // ---------------------------------------------------------------------------
+ensureColumn('agents', 'tokenId', 'tokenId TEXT')
+ensureColumn('feed_posts', 'audit', 'audit TEXT')
+ensureColumn('tasks', 'auditId', 'auditId TEXT')
+ensureColumn('tasks', 'ownerId', 'ownerId TEXT')
+ensureColumn('swarm_runs', 'ownerId', 'ownerId TEXT')
+const activityTables = ['executions', 'audits', 'tasks', 'feed_posts', 'feed_reactions', 'swarm_runs']
+for (const table of activityTables) {
+  ensureColumn(table, 'source', 'source TEXT')
+  ensureColumn(table, 'model', 'model TEXT')
+}
+
+// Old records have no provider provenance. Preserve an atomic SQLite snapshot
+// before excluding them from active metrics; never guess authenticity from text.
+export function archiveUnverifiedActivity() {
+  const counts = Object.fromEntries(activityTables.map((table) => [table,
+    db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE source IS NULL`).get().c]))
+  if (!Object.values(counts).some(Boolean)) return null
+  const archive = `${DATA_DIR}/unverified-history-${Date.now()}.db`
+  db.prepare('VACUUM INTO ?').run(archive)
+  db.transaction(() => {
+    for (const table of activityTables) {
+      // Keep chain payment records in the ledger, but do not treat their old
+      // execution links as evidence of an actual model response.
+      if (table === 'tasks') {
+        db.prepare("UPDATE tasks SET source = 'legacy-chain', executionId = NULL, auditId = NULL WHERE source IS NULL AND escrowTaskId IS NOT NULL").run()
+      }
+      db.prepare(`DELETE FROM ${table} WHERE source IS NULL`).run()
+    }
+  })()
+  console.log(`[db] archived unverified activity to ${archive}`)
+  return { archive, counts }
+}
 const stmts = {
   users: {
     insert: db.prepare(
@@ -157,10 +190,10 @@ const stmts = {
     insert: db.prepare(
       `INSERT OR REPLACE INTO agents
          (id, name, role, gender, stage, specialty, description, tags, price, persona,
-          ownerId, walletAddress, mintTxHash, created_at)
+          ownerId, walletAddress, mintTxHash, created_at, tokenId)
        VALUES
          (@id, @name, @role, @gender, @stage, @specialty, @description, @tags, @price, @persona,
-          @ownerId, @walletAddress, @mintTxHash, @created_at)`
+          @ownerId, @walletAddress, @mintTxHash, @created_at, @tokenId)`
     ),
     all: db.prepare('SELECT * FROM agents'),
   },
@@ -180,8 +213,8 @@ const stmts = {
   },
   tasks: {
     insert: db.prepare(
-      `INSERT OR REPLACE INTO tasks (id, task, agentId, status, executionId, ts)
-       VALUES (@id, @task, @agentId, @status, @executionId, @ts)`
+      `INSERT OR REPLACE INTO tasks (id, task, agentId, status, executionId, ts, escrowTaskId, consumer, amountEth, txHash, payoutEth, feeEth, paidAt, auditId, ownerId)
+       VALUES (@id, @task, @agentId, @status, @executionId, @ts, @escrowTaskId, @consumer, @amountEth, @txHash, @payoutEth, @feeEth, @paidAt, @auditId, @ownerId)`
     ),
     all: db.prepare('SELECT * FROM tasks'),
   },
@@ -194,8 +227,8 @@ const stmts = {
   },
   feed_posts: {
     insert: db.prepare(
-      `INSERT OR REPLACE INTO feed_posts (id, agentId, content, status, auditScore, ts)
-       VALUES (@id, @agentId, @content, @status, @auditScore, @ts)`
+      `INSERT OR REPLACE INTO feed_posts (id, agentId, content, status, auditScore, ts, audit)
+       VALUES (@id, @agentId, @content, @status, @auditScore, @ts, @audit)`
     ),
     all: db.prepare('SELECT * FROM feed_posts'),
   },
@@ -208,8 +241,8 @@ const stmts = {
   },
   swarm_runs: {
     insert: db.prepare(
-      `INSERT OR REPLACE INTO swarm_runs (id, task, agentIds, status, startedAt, finishedAt, results, merged, synthesis, error)
-       VALUES (@id, @task, @agentIds, @status, @startedAt, @finishedAt, @results, @merged, @synthesis, @error)`
+      `INSERT OR REPLACE INTO swarm_runs (id, task, agentIds, status, startedAt, finishedAt, results, merged, synthesis, error, ownerId)
+       VALUES (@id, @task, @agentIds, @status, @startedAt, @finishedAt, @results, @merged, @synthesis, @error, @ownerId)`
     ),
     all: db.prepare('SELECT * FROM swarm_runs'),
   },
@@ -237,24 +270,33 @@ export function dbSaveAll({ users, agents, executions, audits, tasks, config, fe
     users.forEach((u) => stmts.users.insert.run(u))
     agents.forEach((a) =>
       stmts.agents.insert.run({
-        ...a,
+        tokenId: null, ...a,
         tags: JSON.stringify(a.tags || []),
         stage: typeof a.stage === 'string' ? a.stage : a.stage?.id,
       })
     )
     executions.forEach((e) => stmts.executions.insert.run({ ...e, success: e.success ? 1 : 0 }))
     audits.forEach((a) => stmts.audits.insert.run(a))
-    tasks.forEach((t) => stmts.tasks.insert.run(t))
+    tasks.forEach((t) => stmts.tasks.insert.run({ executionId: null, escrowTaskId: null, consumer: null, amountEth: null, txHash: null, payoutEth: null, feeEth: null, paidAt: null, auditId: null, ownerId: null, ...t }))
     Object.entries(config).forEach(([k, v]) => stmts.config.upsert.run(k, JSON.stringify(v)))
-    ;(feedPosts || []).forEach((p) => stmts.feed_posts.insert.run(p))
+    ;(feedPosts || []).forEach((p) => stmts.feed_posts.insert.run({ ...p, audit: JSON.stringify(p.audit || null) }))
     ;(feedReactions || []).forEach((r) => stmts.feed_reactions.insert.run(r))
     ;(swarmRuns || []).forEach((r) =>
       stmts.swarm_runs.insert.run({
         ...r,
+        ownerId: r.ownerId || null,
         agentIds: JSON.stringify(r.agentIds || []),
         results: JSON.stringify(r.results || []),
       })
     )
+    const collections = { executions, audits, tasks, feed_posts: feedPosts || [], feed_reactions: feedReactions || [], swarm_runs: swarmRuns || [] }
+    for (const [table, records] of Object.entries(collections)) {
+      const provenance = db.prepare(`UPDATE ${table} SET source = ?, model = ? WHERE id = ?`)
+      const selected = JSON.parse(db.prepare("SELECT value FROM config WHERE key = 'runtime'").get()?.value || '{}')
+      const source = selected.provider || process.env.AI_PROVIDER || 'gemini'
+      const model = source === 'openai' ? selected.openaiModel || process.env.OPENAI_MODEL || 'gpt-4.1-mini' : selected.geminiModel || process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
+      for (const record of records) provenance.run(record.source || source, record.model || model, record.id)
+    }
   })
   tx()
 }
@@ -265,7 +307,7 @@ export function dbLoadAll() {
   const executions = stmts.executions.all.all().map(rowToExec)
   const audits = stmts.audits.all.all()
   const tasks = stmts.tasks.all.all()
-  const feedPosts = stmts.feed_posts.all.all()
+  const feedPosts = stmts.feed_posts.all.all().map((p) => ({ ...p, audit: p.audit ? JSON.parse(p.audit) : null }))
   const feedReactions = stmts.feed_reactions.all.all()
   const swarmRuns = stmts.swarm_runs.all.all().map((r) => ({
     ...r,
@@ -281,35 +323,6 @@ export function dbLoadAll() {
     }
   })
   return { users, agents, executions, audits, tasks, config, feedPosts, feedReactions, swarmRuns }
-}
-
-// ---------------------------------------------------------------------------
-// One-time migration from the legacy JSON store (data/store.json).
-// Runs only when the DB has no records and the legacy file exists.
-// ---------------------------------------------------------------------------
-export function migrateLegacyJson() {
-  if (!existsSync(LEGACY_FILE)) return false
-  const { executions, audits, tasks, config } = dbLoadAll()
-  if (executions.length || audits.length || tasks.length) return false
-  try {
-    const raw = JSON.parse(readFileSync(LEGACY_FILE, 'utf8'))
-    const migrated = {
-      users: [],
-      agents: [],
-      executions: raw.executions || [],
-      audits: raw.audits || [],
-      tasks: raw.tasks || [],
-      config: raw.config || {},
-    }
-    dbSaveAll(migrated)
-    console.log(
-      `[db] migrated ${migrated.executions.length} executions, ${migrated.audits.length} audits from store.json`
-    )
-    return true
-  } catch (e) {
-    console.error('[db] legacy migration failed:', e.message)
-    return false
-  }
 }
 
 export function dbCounts() {
@@ -329,10 +342,10 @@ export function dbMaxSeq() {
   const tables = ['executions', 'audits', 'tasks', 'users', 'agents', 'feed_posts', 'feed_reactions', 'swarm_runs']
   let max = 0
   for (const t of tables) {
-    const row = db.prepare(`SELECT id FROM ${t} ORDER BY id DESC LIMIT 1`).get()
-    if (!row) continue
-    const m = /-(\d+)$/.exec(row.id)
-    if (m) max = Math.max(max, parseInt(m[1], 10))
+    for (const row of db.prepare(`SELECT id FROM ${t}`).all()) {
+      const m = /-(\d+)$/.exec(row.id)
+      if (m) max = Math.max(max, Number(m[1]))
+    }
   }
   return max
 }

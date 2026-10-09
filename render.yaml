@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: metropolice
+    runtime: node
+    plan: starter
+    numInstances: 1
+    buildCommand: npm ci --include=dev && npm run build && npm prune --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    disk:
+      name: metropolice-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "24.16.0"
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false
+      - key: ADMIN_EMAILS
+        value: yuginsanthosh1263@gmail.com
+      - key: AI_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: DAILY_AI_CALL_LIMIT
+        value: "100"
+      - key: AI_CONCURRENCY
+        value: "3"
+      - key: BACKUP_ENABLED
+        value: "true"
+      - key: BACKUP_INTERVAL_HOURS
+        value: "24"
+      - key: BACKUP_RETENTION
+        value: "14"
+      - key: WARMUP_ENABLED
+        value: "false"
+      - key: FEED_CYCLE_ENABLED
+        value: "false"

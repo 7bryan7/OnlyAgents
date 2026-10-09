@@ -1,3 +1,4 @@
+import './env.js'
 // ---------------------------------------------------------------------------
 // On-chain verification (PRD v2 §4.3, §7):
 //   "All on-chain payments must be verified server-side against the actual
@@ -17,7 +18,7 @@ const RPC = process.env.BASE_SEPOLIA_RPC || 'https://sepolia.base.org'
 
 export const publicClient = createPublicClient({
   chain: baseSepolia,
-  transport: http(RPC),
+  transport: http(RPC, { timeout: 10000, retryCount: 1 }),
 })
 
 // AgentFactory address — from deployed.json (written by scripts/deploy.js),
@@ -69,7 +70,7 @@ export async function verifyMint(txHash, expectedOwner, expectedMetadataHash) {
   }
   if (!receipt) return { ok: false, error: 'transaction not found on chain' }
   if (receipt.status !== 'success') return { ok: false, error: 'transaction reverted on chain' }
-  if (getAddress(receipt.to) !== getAddress(AGENT_FACTORY_ADDRESS)) {
+  if (getAddress(receipt.to || "0x0000000000000000000000000000000000000000") !== getAddress(AGENT_FACTORY_ADDRESS)) {
     return { ok: false, error: 'transaction did not call AgentFactory' }
   }
 
@@ -140,7 +141,7 @@ export async function verifyCreateTask(txHash, expectedConsumer, expectedAgentOw
   }
   if (!receipt) return { ok: false, error: 'transaction not found on chain' }
   if (receipt.status !== 'success') return { ok: false, error: 'transaction reverted on chain' }
-  if (getAddress(receipt.to) !== getAddress(TASK_ESCROW_ADDRESS)) {
+  if (getAddress(receipt.to || "0x0000000000000000000000000000000000000000") !== getAddress(TASK_ESCROW_ADDRESS)) {
     return { ok: false, error: 'transaction did not call TaskEscrow' }
   }
 
@@ -181,7 +182,7 @@ export async function verifyCompleteTask(txHash, expectedTaskId) {
   }
   if (!receipt) return { ok: false, error: 'transaction not found on chain' }
   if (receipt.status !== 'success') return { ok: false, error: 'transaction reverted on chain' }
-  if (getAddress(receipt.to) !== getAddress(TASK_ESCROW_ADDRESS)) {
+  if (getAddress(receipt.to || "0x0000000000000000000000000000000000000000") !== getAddress(TASK_ESCROW_ADDRESS)) {
     return { ok: false, error: 'transaction did not call TaskEscrow' }
   }
 
@@ -210,8 +211,8 @@ export async function verifyCompleteTask(txHash, expectedTaskId) {
 // prunes history before ~block 44.5M. The contracts were deployed 2026-08-30
 // and only *used* since then, so scanning the last 100k blocks (~2.3 days)
 // captures every real event while keeping the endpoint fast.
-const LOG_CHUNK = 10_000n
-const TREASURY_SCAN_WINDOW = 100_000n
+const LOG_CHUNK = BigInt(Math.max(1, Math.min(10000, Number(process.env.RPC_LOG_CHUNK) || 200)))
+const TREASURY_SCAN_WINDOW = BigInt(Math.max(1, Math.min(100000, Number(process.env.TREASURY_SCAN_BLOCKS) || 2000)))
 
 let treasuryCache = { at: 0, stats: null }
 const TREASURY_TTL_MS = 60_000
@@ -236,7 +237,7 @@ export async function readTreasuryStats() {
   const stats = { taskFeesEth: 0, mintFeesEth: 0, tasksPaid: 0, agentsMinted: 0, escrow: null, factory: null }
   try {
     const latest = await publicClient.getBlockNumber()
-    const from = latest > TREASURY_SCAN_WINDOW ? latest - TREASURY_SCAN_WINDOW : 0n
+    const from = latest >= TREASURY_SCAN_WINDOW ? latest - TREASURY_SCAN_WINDOW + 1n : 0n
     if (TASK_ESCROW_ADDRESS) {
       const [paidLogs, releasedLogs] = await Promise.all([
         getLogsPaged(TASK_ESCROW_ADDRESS, TASK_PAID, from, latest),
@@ -254,8 +255,9 @@ export async function readTreasuryStats() {
       stats.factory = AGENT_FACTORY_ADDRESS
     }
   } catch (e) {
-    console.error('[chain] treasury stats failed:', e.message)
+    throw Object.assign(new Error('Cannot read treasury events: ' + e.message.replaceAll(RPC, '[server RPC]')), { status: 502 })
   }
+  stats.scope = `Recent ${TREASURY_SCAN_WINDOW.toLocaleString()} blocks; not lifetime revenue`
   stats.totalEth = stats.taskFeesEth + stats.mintFeesEth
   treasuryCache = { at: Date.now(), stats }
   return stats

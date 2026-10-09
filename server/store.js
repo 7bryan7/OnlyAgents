@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // In-memory store: executions, audits, tasks, users.
 // NO synthetic seed — every record is produced by a real runtime call
-// (Gemini when live, simulation only as a fallback). Metrics are always
+// (Gemini only). Metrics are always
 // computed from these real records.
 //
 // Persistence: SQLite via db.js (PRD v2 §6.4). The in-memory arrays are the
@@ -11,7 +11,7 @@
 
 import { AGENTS } from './agents.js'
 import { runAgent, auditOutput } from './runtime.js'
-import { dbSaveAll, dbLoadAll, migrateLegacyJson, dbMaxSeq, dbCounts } from './db.js'
+import { dbSaveAll, dbLoadAll, archiveUnverifiedActivity, dbMaxSeq, dbCounts } from './db.js'
 
 export const store = {
   executions: [], // { id, agentId, task, output, success, latencyMs, ts }
@@ -48,16 +48,16 @@ export function getAgent(id) {
 // ---------------------------------------------------------------------------
 export function loadStore() {
   try {
-    migrateLegacyJson()
+    archiveUnverifiedActivity()
     const data = dbLoadAll()
     store.executions = data.executions
     store.audits = data.audits
-    store.tasks = data.tasks
+    store.tasks = data.tasks.map((t) => (t.status === 'running' || (t.status === 'escrowed' && !t.executionId)) ? { ...t, status: 'failed' } : t)
     store.users = data.users
     store.agents = data.agents
     store.feedPosts = data.feedPosts || []
     store.feedReactions = data.feedReactions || []
-    store.swarmRuns = data.swarmRuns || []
+    store.swarmRuns = (data.swarmRuns || []).map((r) => r.status === 'running' ? { ...r, status: 'failed', finishedAt: Date.now(), error: 'Server stopped before this analysis finished. Submit a new analysis.' } : r)
     if (data.config.reputation) {
       store.config = {
         reputation: { ...store.config.reputation, ...data.config.reputation },
@@ -70,31 +70,12 @@ export function loadStore() {
     store.seq = Math.max(dbMaxSeq(), counts.executions + counts.audits + counts.tasks + counts.users)
     return store.executions.length > 0 || store.audits.length > 0
   } catch (e) {
-    console.error('[store] failed to load persisted data:', e.message)
-    return false
+    throw new Error('Cannot load persisted data: ' + e.message)
   }
 }
 
-let saveTimer = null
 export function saveStore() {
-  clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    try {
-      dbSaveAll({
-        users: store.users,
-        agents: store.agents, // custom on-chain agents
-        executions: store.executions,
-        audits: store.audits,
-        tasks: store.tasks,
-        config: store.config,
-        feedPosts: store.feedPosts,
-        feedReactions: store.feedReactions,
-        swarmRuns: store.swarmRuns,
-      })
-    } catch (e) {
-      console.error('[store] failed to persist:', e.message)
-    }
-  }, 400)
+  dbSaveAll(store)
 }
 
 export function nextId(prefix) {
@@ -152,7 +133,7 @@ function pickTask(agent) {
 // runtime so the dashboard is populated with real execution records.
 // Runs in the background; safe to call at startup.
 // ---------------------------------------------------------------------------
-export async function warmup({ tasksPerAgent = 1, audits = true, concurrency = 2, spacingMs = 1200 } = {}) {
+export async function warmup({ tasksPerAgent = 1, audits = true, concurrency = 2, spacingMs = 1200, onProgress } = {}) {
   if (store.warmup.running) return
   store.warmup.running = true
   store.warmup.startedAt = Date.now()
@@ -188,12 +169,13 @@ export async function warmup({ tasksPerAgent = 1, audits = true, concurrency = 2
             success: result.success,
             latencyMs: result.latencyMs,
             ts: Date.now(),
+            source: result.source, model: result.model,
           })
           saveStore()
         } else {
           // Audit the agent's most recent execution
           const ex = [...store.executions].reverse().find((e) => e.agentId === job.agent.id)
-          if (ex) {
+          if (ex?.success) {
             const auditor =
               AGENTS.find((a) => a.id !== job.agent.id && a.stage.id === job.agent.stage.id) ||
               AGENTS.find((a) => a.id !== job.agent.id)
@@ -207,6 +189,7 @@ export async function warmup({ tasksPerAgent = 1, audits = true, concurrency = 2
               verdict: result.verdict,
               note: result.note,
               ts: Date.now(),
+              source: result.source, model: result.model,
             })
             saveStore()
           }
@@ -215,6 +198,7 @@ export async function warmup({ tasksPerAgent = 1, audits = true, concurrency = 2
         console.error('[warmup] job failed:', e.message)
       }
       store.warmup.done += 1
+      onProgress?.()
       if (store.warmup.done % 5 === 0 || store.warmup.done === store.warmup.total) {
         console.log(`[warmup] ${store.warmup.done}/${store.warmup.total} real records`)
       }

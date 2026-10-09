@@ -7,6 +7,7 @@ require('dotenv').config()
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
+  paths: { artifacts: '.hardhat/artifacts', cache: '.hardhat/cache' },
   solidity: {
     version: '0.8.25',
     settings: {

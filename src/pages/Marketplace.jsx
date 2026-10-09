@@ -4,7 +4,7 @@ import AgentCard from '../components/AgentCard'
 import CompareModal from '../components/CompareModal'
 import CreateAgentModal from '../components/CreateAgentModal'
 import HireModal from '../components/HireModal'
-import { LIFECYCLE_STAGES, STATUS_META, trustColor } from '../data/agents'
+import { LIFECYCLE_STAGES, STATUS_META, trustColor } from '../agentMeta'
 import { useData } from '../DataContext'
 
 const SORTS = [
@@ -204,7 +204,7 @@ export default function Marketplace() {
               </span>
             ))}
           </div>
-          {compare.length === 3 && (
+          {compare.length >= 2 && (
             <button
               onClick={() => setCompareOpen(true)}
               className="text-xs font-bold bg-brand-600 text-white rounded-lg px-3 py-1.5 hover:bg-brand-700 transition-colors"

@@ -6,7 +6,7 @@ const DataContext = createContext(null)
 
 /**
  * Loads agents / swarms / audits from the backend.
- * Falls back to bundled fake data when the backend is offline.
+ * Exposes an explicit offline state when the API is unavailable.
  * Exposes runTask / auditTask for the live demo flow.
  */
 export function DataProvider({ children }) {
@@ -27,8 +27,9 @@ export function DataProvider({ children }) {
   // resource instead of waiting for the next poll. `all` refreshes everything.
   useEffect(() => {
     return onWSMessage((msg) => {
+      if (msg.type === 'hello') { refresh(); return }
       if (msg.type !== 'update') return
-      if (msg.resource === 'all' || msg.resource === 'agents' || msg.resource === 'config') {
+      if (msg.resource === 'all' || msg.resource === 'agents' || msg.resource === 'config' || msg.resource === 'feed' || msg.resource === 'tasks') {
         refresh()
       }
     })
@@ -43,7 +44,7 @@ export function DataProvider({ children }) {
       setSwarms(s.swarms)
       setAudits(au.audits)
       setAuditTotal(au.total || au.audits.length)
-      setMode(a.mode)
+      setMode(a.live && s.live && au.live && c.live ? a.mode : 'offline')
       setConfig(c.config)
       setChain(ch.chain)
       setLoading(false)

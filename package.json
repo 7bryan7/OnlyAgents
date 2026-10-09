@@ -4,32 +4,44 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "backup": "node scripts/backup.mjs",
+    "check:services": "node scripts/setup.mjs --live",
     "dev": "vite",
     "dev:api": "node server/index.js",
     "dev:all": "concurrently -n api,web -c blue,green \"node server/index.js\" \"vite\"",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server/index.js",
+    "test": "node --test tests/api.test.js tests/backups.test.js",
+    "test:contracts": "hardhat test",
+    "test:e2e": "playwright test",
+    "test:production": "node --test tests/production.test.js",
+    "check:chain": "node scripts/check-chain.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
     "@fontsource/sora": "^5.3.0",
     "@openzeppelin/contracts": "^5.6.1",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^12.11.1",
     "cors": "^2.8.6",
     "d3-force": "^3.0.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "google-auth-library": "^11.1.0",
     "lucide-react": "^1.35.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.28.0",
+    "react-router-dom": "^7.18.4",
     "recharts": "^3.10.1",
-    "viem": "^2.56.0"
+    "viem": "^2.56.0",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@playwright/test": "^1.63.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
@@ -44,5 +56,8 @@
     "postcss": "^8.5.26",
     "tailwindcss": "^3.4.17",
     "vite": "^5.4.10"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

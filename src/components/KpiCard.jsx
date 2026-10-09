@@ -5,10 +5,13 @@ import { TrendingUp, TrendingDown, ArrowUpRight } from 'lucide-react'
  * Interactive KPI card — click to cycle through metric detail modes.
  * Modes: value → delta → sparkline
  */
-export default function KpiCard({ title, value, unit, delta, deltaLabel, spark, icon: Icon, accent = '#3d6cec', onClick }) {
+export default function KpiCard({ title, value, unit, delta, deltaLabel, spark, icon: Icon, accent = '#3d6cec', onClick, lowerIsBetter = false }) {
   const [mode, setMode] = useState(0)
   const modes = ['value', 'delta', 'spark']
   const up = delta >= 0
+  const points = (spark || []).filter((v) => v != null)
+  const min = Math.min(0, ...points)
+  const range = Math.max(1, ...points) - min
 
   const cycle = () => {
     setMode((m) => (m + 1) % modes.length)
@@ -40,11 +43,11 @@ export default function KpiCard({ title, value, unit, delta, deltaLabel, spark, 
         <div className="mt-3 flex items-center gap-2">
           <span
             className={`inline-flex items-center gap-1 text-sm font-bold tabular-nums ${
-              up ? 'text-emerald-600' : 'text-red-500'
+              (lowerIsBetter ? !up : up) ? 'text-emerald-600' : 'text-red-500'
             }`}
           >
             {up ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
-            {up ? '+' : ''}{delta}%
+            {delta == null ? 'No prior data' : (up ? '+' : '') + delta + '%'}
           </span>
           <span className="text-xs text-slate-400 dark:text-slate-500">{deltaLabel}</span>
         </div>
@@ -54,7 +57,7 @@ export default function KpiCard({ title, value, unit, delta, deltaLabel, spark, 
         <div className="mt-3 h-10">
           <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="w-full h-full">
             <polyline
-              points={spark.map((v, i) => `${(i / (spark.length - 1)) * 100},${40 - (v / 100) * 38}`).join(' ')}
+              points={points.map((v, i) => `${(i / Math.max(1, points.length - 1)) * 100},${40 - ((v - min) / range) * 38}`).join(' ')}
               fill="none"
               stroke={accent}
               strokeWidth="2"

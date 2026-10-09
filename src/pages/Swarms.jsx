@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Network, Activity, Zap, Bot, Play, Loader2, FileText, Clock, ChevronRight, CheckCircle2, XCircle } from 'lucide-react'
 import NetworkGraph from '../components/NetworkGraph'
-import { trustColor, STATUS_META } from '../data/agents'
+import { trustColor, STATUS_META } from '../agentMeta'
 import { useData } from '../DataContext'
 import { api } from '../api'
 
@@ -16,8 +16,10 @@ function timeAgo(ts) {
 }
 
 export default function Swarms() {
-  const { swarms, agents } = useData()
-  const [selectedSwarm, setSelectedSwarm] = useState(swarms[0]?.id)
+  const { swarms, agents, mode } = useData()
+  const [params] = useSearchParams()
+  const [selectedSwarm, setSelectedSwarm] = useState(params.get('swarm') || swarms[0]?.id)
+  useEffect(() => { if (params.get('swarm')) setSelectedSwarm(params.get('swarm')) }, [params])
   const swarm = swarms.find((s) => s.id === selectedSwarm) || swarms[0]
   const members = swarm ? swarm.agents.map((id) => agents.find((a) => a.id === id)).filter(Boolean) : []
 
@@ -114,7 +116,7 @@ export default function Swarms() {
             </select>
             <button
               onClick={analyze}
-              disabled={!task.trim() || running}
+              disabled={!task.trim() || running || !['gemini', 'openai'].includes(mode)}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
             >
               {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
@@ -142,10 +144,11 @@ export default function Swarms() {
                 {timeAgo(run.finishedAt)}
               </div>
               <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                merged report
+                {run.status === 'failed' ? 'Analysis failed' : 'merged report'}
               </span>
             </div>
 
+            {run.error && <p role="alert" className="text-amber-600">{run.error}</p>}
             {run.synthesis && (
               <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 p-4">
                 <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
@@ -225,7 +228,7 @@ export default function Swarms() {
               <p className="mt-2.5 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{s.description}</p>
               <div className="mt-3 flex items-center gap-4 text-[11px] text-slate-400 dark:text-slate-500">
                 <span className="inline-flex items-center gap-1"><Bot size={12} /> {s.agents.length} agents</span>
-                <span className="inline-flex items-center gap-1"><Zap size={12} /> {s.throughput} tasks/hr</span>
+                <span className="inline-flex items-center gap-1"><Zap size={12} /> {s.throughput} tasks/24h</span>
               </div>
             </button>
           )
@@ -330,7 +333,7 @@ export default function Swarms() {
           </div>
           <div className="bg-white/10 rounded-xl px-4 py-3 text-center">
             <div className="text-2xl font-bold tabular-nums">{swarm.throughput}</div>
-            <div className="text-[10px] text-brand-200 uppercase">tasks/hr</div>
+            <div className="text-[10px] text-brand-200 uppercase">tasks/24h</div>
           </div>
         </div>
       </div>

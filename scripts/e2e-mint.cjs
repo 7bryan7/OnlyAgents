@@ -3,7 +3,7 @@
 // Sepolia): deploy contracts → mint an agent (as the "user wallet") → verify
 // the txHash through the backend's on-chain verification → agent created.
 //
-//   npx hardhat run scripts/e2e-mint.js --network localhost
+//   npx hardhat run scripts/e2e-mint.cjs --network localhost
 // ---------------------------------------------------------------------------
 const hre = require('hardhat')
 
@@ -33,6 +33,7 @@ async function main() {
   console.log(`BASE_SEPOLIA_RPC=http://127.0.0.1:8545`)
   console.log(`BASE_SEPOLIA_AGENT_FACTORY=${factoryAddr}`)
   console.log(`\nPOST /api/agents/custom body:`)
+  console.log('Requires Authorization: Bearer <current Google ID token>. Owner identity comes from the token.')
   console.log(JSON.stringify({ txHash: receipt.hash, walletAddress: user.address, name, personaPrompt, specialty, email: 'owner@demo.io' }, null, 2))
 }
 

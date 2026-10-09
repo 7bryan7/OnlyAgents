@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { X, Bot, ArrowUpRight, Trash2, Crown } from 'lucide-react'
-import { STATUS_META, trustColor, fmtMs } from '../data/agents'
+import { STATUS_META, trustColor, fmtMs } from '../agentMeta'
 
 /**
  * Side-by-side agent comparison modal.
@@ -30,7 +30,7 @@ export default function CompareModal({ agents, onClose, onRemove }) {
     tasks: Math.max(...agents.map((a) => a.tasksCompleted)),
     audits: Math.max(...agents.map((a) => a.auditsReceived)),
   }
-  const maxResponse = Math.max(...agents.map((a) => a.avgResponseTime))
+  const maxResponse = Math.max(1, ...agents.map((a) => a.avgResponseTime))
   const maxPrice = Math.max(...agents.map((a) => a.pricePerTask))
 
   const rows = [

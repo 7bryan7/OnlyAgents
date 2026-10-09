@@ -7,10 +7,10 @@ import { useEffect, useState } from 'react'
 
 const MODE_META = {
   loading: { label: 'Connecting…', color: '#94a3b8', bg: '#f1f5f9' },
-  simulated: { label: 'Simulated runtime', color: '#f59e0b', bg: '#fffbeb' },
-  gemini: { label: 'Gemini live', color: '#10b981', bg: '#ecfdf5' },
-  fallback: { label: 'Demo data (backend offline)', color: '#ef4444', bg: '#fef2f2' },
-  offline: { label: 'Demo data', color: '#ef4444', bg: '#fef2f2' },
+  unconfigured: { label: 'AI key required', color: '#f59e0b', bg: '#fffbeb' },
+  gemini: { label: 'Gemini configured', color: '#10b981', bg: '#ecfdf5' },
+  openai: { label: 'OpenAI configured', color: '#10b981', bg: '#ecfdf5' },
+  offline: { label: 'Backend offline', color: '#ef4444', bg: '#fef2f2' },
 }
 
 export default function SettingsModal({ open, onClose }) {
@@ -20,6 +20,7 @@ export default function SettingsModal({ open, onClose }) {
   const [weights, setWeights] = useState(config.reputation)
   const [threshold, setThreshold] = useState(config.hireThreshold)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const [wallet, setWallet] = useState('')
   const [walletSaved, setWalletSaved] = useState(false)
 
@@ -39,6 +40,7 @@ export default function SettingsModal({ open, onClose }) {
   const saveWallet = async () => {
     if (!user?.email) return
     setWalletSaved(false)
+    setError('')
     try {
       await api.updateProfile({
         email: user.email,
@@ -49,7 +51,7 @@ export default function SettingsModal({ open, onClose }) {
       setWalletSaved(true)
       setTimeout(() => setWalletSaved(false), 2500)
     } catch (e) {
-      console.error('[settings] failed to save wallet:', e.message)
+      setError(e.message)
     }
   }
 
@@ -61,7 +63,7 @@ export default function SettingsModal({ open, onClose }) {
 
   if (!open) return null
 
-  const meta = MODE_META[mode] || MODE_META.fallback
+  const meta = MODE_META[mode] || MODE_META.offline
 
   const stats = [
     { icon: Bot, label: 'Agents registered', value: agents.length },
@@ -75,19 +77,20 @@ export default function SettingsModal({ open, onClose }) {
     const next = { ...weights, [key]: value }
     const others = Object.keys(next).filter((k) => k !== key)
     const rest = 1 - value
-    const otherSum = others.reduce((s, k) => s + next[k], 0) || 1
+    const otherSum = others.reduce((s, k) => s + next[k], 0)
     others.forEach((k) => {
-      next[k] = Math.round((next[k] / otherSum) * rest * 1000) / 1000
+      next[k] = Math.round((otherSum ? next[k] / otherSum : 1 / others.length) * rest * 1000) / 1000
     })
     setWeights(next)
   }
 
   const commit = async () => {
     setSaving(true)
+    setError('')
     try {
       await updateConfig({ reputation: weights, hireThreshold: threshold })
     } catch (e) {
-      console.error('[settings] failed to save config:', e.message)
+      setError(e.message)
     } finally {
       setSaving(false)
     }
@@ -100,6 +103,7 @@ export default function SettingsModal({ open, onClose }) {
       {/* Backdrop */}
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
 
+      {error && <div role="alert" className="absolute top-5 z-10 rounded bg-red-100 p-3 text-red-700">{error}</div>}
       {/* Panel */}
       <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
@@ -163,7 +167,7 @@ export default function SettingsModal({ open, onClose }) {
               <p className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
                 {walletSaved
                   ? 'Saved to your profile.'
-                  : 'Where hired-agent payouts land. Wallet connect (wagmi) arrives with custom agent minting.'}
+                  : 'Profile preference only. Minting and hiring require a connected, verified wallet.'}
               </p>
             </div>
           </div>
@@ -244,7 +248,7 @@ export default function SettingsModal({ open, onClose }) {
               </div>
               <button
                 onClick={commit}
-                disabled={saving || Math.abs(weightSum - 1) > 0.01}
+                disabled={user?.role !== 'admin' || saving || Math.abs(weightSum - 1) > 0.01}
                 className="w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors"
               >
                 {saving ? 'Saving…' : 'Apply protocol config'}

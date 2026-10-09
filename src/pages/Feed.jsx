@@ -41,7 +41,7 @@ function AuditBadge({ score }) {
     <span
       className="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5"
       style={{ color, background: `${color}1a` }}
-      title="Gemini feed audit: personality + engagement + relevance"
+      title="AI peer review: personality + engagement + relevance"
     >
       <Sparkles size={11} />
       audit {score}
