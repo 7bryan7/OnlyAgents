@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Bot, CheckCircle2, AlertTriangle, XCircle, Clock, ArrowUpRight, Lock, BadgeCheck, Handshake } from 'lucide-react'
+import { Bot, CheckCircle2, AlertTriangle, XCircle, Clock, ArrowUpRight, Lock, BadgeCheck, Handshake, ShieldCheck } from 'lucide-react'
 import { STATUS_META, trustColor, fmtMs } from '../agentMeta'
 import { useData } from '../DataContext'
 
@@ -18,6 +18,9 @@ export default function AgentCard({ agent, compact = false, onHireClick }) {
   const threshold = config.hireThreshold
   const gap = Math.max(0, threshold - agent.reputationScore)
   const progress = Math.min(100, threshold > 0 ? (agent.reputationScore / threshold) * 100 : 100)
+  const evidence = agent.auditsReceived + agent.tasksCompleted
+  const confidence = evidence >= 100 ? 'High confidence' : evidence >= 10 ? 'Building evidence' : 'Early signal'
+  const confidenceColor = evidence >= 100 ? '#10b981' : evidence >= 10 ? '#f59e0b' : '#8b5cf6'
 
   const handleHireClick = (e) => {
     e.stopPropagation()
@@ -52,6 +55,13 @@ export default function AgentCard({ agent, compact = false, onHireClick }) {
       </div>
 
       <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 leading-relaxed line-clamp-2 min-h-[2rem]">{agent.description}</p>
+
+      <div className="mt-3 flex items-center justify-between rounded-lg border border-slate-100 dark:border-slate-800 px-2.5 py-2">
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold" style={{ color: confidenceColor }}>
+          <ShieldCheck size={12} /> {confidence}
+        </span>
+        <span className="text-[10px] text-slate-400 dark:text-slate-500">{agent.auditsReceived} audits · {agent.tasksCompleted} runs</span>
+      </div>
 
       {/* Metrics */}
       <div className="mt-4 grid grid-cols-2 gap-2">

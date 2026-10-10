@@ -1,15 +1,13 @@
-import { X, LogOut, Bot, ShieldCheck, Network, Activity, Scale, Wallet } from 'lucide-react'
+import { X, LogOut, Bot, ShieldCheck, Network, Activity, Scale } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { useData } from '../DataContext'
-import { api } from '../api'
 import { useEffect, useState } from 'react'
 
 const MODE_META = {
   loading: { label: 'Connecting…', color: '#94a3b8', bg: '#f1f5f9' },
   unconfigured: { label: 'AI key required', color: '#f59e0b', bg: '#fffbeb' },
   gemini: { label: 'Gemini configured', color: '#10b981', bg: '#ecfdf5' },
-  openai: { label: 'OpenAI configured', color: '#10b981', bg: '#ecfdf5' },
   offline: { label: 'Backend offline', color: '#ef4444', bg: '#fef2f2' },
 }
 
@@ -21,39 +19,6 @@ export default function SettingsModal({ open, onClose }) {
   const [threshold, setThreshold] = useState(config.hireThreshold)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [wallet, setWallet] = useState('')
-  const [walletSaved, setWalletSaved] = useState(false)
-
-  // Load the server-side profile (wallet address) when the modal opens
-  useEffect(() => {
-    if (!open || !user?.email) return
-    let cancelled = false
-    api.profile(user.email).then(({ profile }) => {
-      if (cancelled || !profile) return
-      setWallet(profile.walletAddress || '')
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [open, user?.email])
-
-  const saveWallet = async () => {
-    if (!user?.email) return
-    setWalletSaved(false)
-    setError('')
-    try {
-      await api.updateProfile({
-        email: user.email,
-        name: user.name,
-        picture: user.picture,
-        walletAddress: wallet.trim() || null,
-      })
-      setWalletSaved(true)
-      setTimeout(() => setWalletSaved(false), 2500)
-    } catch (e) {
-      setError(e.message)
-    }
-  }
 
   // Keep local sliders in sync when config reloads (e.g. after refresh)
   useEffect(() => {
@@ -105,7 +70,7 @@ export default function SettingsModal({ open, onClose }) {
 
       {error && <div role="alert" className="absolute top-5 z-10 rounded bg-red-100 p-3 text-red-700">{error}</div>}
       {/* Panel */}
-      <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="relative flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-900">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
           <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200">Settings</h2>
           <button
@@ -117,7 +82,8 @@ export default function SettingsModal({ open, onClose }) {
           </button>
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="min-h-0 overflow-y-auto p-5">
+          <div className="grid gap-5 md:grid-cols-2">
           {/* Account */}
           <div>
             <div className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-2">Account</div>
@@ -143,33 +109,6 @@ export default function SettingsModal({ open, onClose }) {
               </span>
             </div>
 
-            {/* Wallet (PRD §4.1) — payout address for hired agents; wagmi connect lands in Phase 2 */}
-            <div className="mt-2.5 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
-              <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-2">
-                <Wallet size={12} />
-                Payout wallet
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={wallet}
-                  onChange={(e) => setWallet(e.target.value)}
-                  placeholder="0x… (Base Sepolia address)"
-                  spellCheck={false}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-brand-300 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-500/20 outline-none text-xs font-mono text-slate-700 dark:text-slate-300"
-                />
-                <button
-                  onClick={saveWallet}
-                  className="shrink-0 px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold transition-colors"
-                >
-                  Save
-                </button>
-              </div>
-              <p className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
-                {walletSaved
-                  ? 'Saved to your profile.'
-                  : 'Profile preference only. Minting and hiring require a connected, verified wallet.'}
-              </p>
-            </div>
           </div>
 
           {/* Runtime */}
@@ -192,7 +131,7 @@ export default function SettingsModal({ open, onClose }) {
           </div>
 
           {/* Reputation protocol */}
-          <div>
+          <div className="md:col-span-2">
             <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-2">
               <Scale size={11} />
               Reputation protocol
@@ -255,14 +194,15 @@ export default function SettingsModal({ open, onClose }) {
               </button>
             </div>
           </div>
+          </div>
 
           {/* Sign out */}
           <button
+            className="mt-5 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-sm font-semibold hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
             onClick={() => {
               signOut()
               navigate('/')
             }}
-            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-sm font-semibold hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
           >
             <LogOut size={15} />
             Sign out

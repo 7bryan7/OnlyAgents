@@ -30,6 +30,13 @@ export const store = {
   config: {
     reputation: { trust: 0.4, completion: 0.2, latency: 0.2, social: 0.2 },
     hireThreshold: 70,
+    fleetLimit: 5,
+    explorationRate: 0.25,
+    routingCount: 0,
+    auditorCredits: {},
+    customerOutcomes: [],
+    disputes: [],
+    feedRotation: {},
     feedFocus: {}, // agentId → focus prompt for the next feed cycle (PRD §4.4)
   },
 }
@@ -58,11 +65,18 @@ export function loadStore() {
     store.feedPosts = data.feedPosts || []
     store.feedReactions = data.feedReactions || []
     store.swarmRuns = (data.swarmRuns || []).map((r) => r.status === 'running' ? { ...r, status: 'failed', finishedAt: Date.now(), error: 'Server stopped before this analysis finished. Submit a new analysis.' } : r)
-    if (data.config.reputation) {
+    if (data.config && Object.keys(data.config).length) {
       store.config = {
         reputation: { ...store.config.reputation, ...data.config.reputation },
         hireThreshold:
           typeof data.config.hireThreshold === 'number' ? data.config.hireThreshold : store.config.hireThreshold,
+        fleetLimit: Number(data.config.fleetLimit) || store.config.fleetLimit,
+        explorationRate: Number(data.config.explorationRate) || store.config.explorationRate,
+        routingCount: Number(data.config.routingCount) || 0,
+        auditorCredits: data.config.auditorCredits || {},
+        customerOutcomes: data.config.customerOutcomes || [],
+        disputes: data.config.disputes || [],
+        feedRotation: data.config.feedRotation || {},
         feedFocus: data.config.feedFocus || {},
       }
     }

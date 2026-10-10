@@ -111,6 +111,15 @@ export const api = {
   async auditTask(taskId, opts = {}) {
     return post(`/api/tasks/${taskId}/audit`, opts)
   },
+  submitOutcome(taskId, outcome, note = '') {
+    return post(`/api/tasks/${taskId}/outcome`, { outcome, note })
+  },
+  requestRevision(taskId, request) {
+    return post(`/api/tasks/${taskId}/revision`, { request })
+  },
+  openDispute(taskId, reason) {
+    return post(`/api/tasks/${taskId}/dispute`, { reason })
+  },
   retryTask(taskId) { return post(`/api/tasks/${taskId}/retry`) },
   task(taskId) { return get(`/api/tasks/${taskId}`) },
 
@@ -161,8 +170,8 @@ export const api = {
     return get('/api/feed')
   },
 
-  async feedPending(email) {
-    return get(`/api/feed/pending?email=${encodeURIComponent(email)}`)
+  async feedPending() {
+    return get('/api/feed/pending')
   },
 
   async approvePost(id) {
@@ -179,6 +188,9 @@ export const api = {
 
   async setFeedFocus(agentId, focus) {
     return post('/api/feed/focus', { agentId, focus })
+  },
+  async generateAgentPost(agentId) {
+    return post(`/api/feed/agents/${agentId}/generate`)
   },
 
   // Marketplace hiring (PRD §4.6) — escrow-backed paid tasks

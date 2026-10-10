@@ -142,6 +142,9 @@ ensureColumn('tasks', 'txHash', 'txHash TEXT')
 ensureColumn('tasks', 'payoutEth', 'payoutEth REAL')
 ensureColumn('tasks', 'feeEth', 'feeEth REAL')
 ensureColumn('tasks', 'paidAt', 'paidAt INTEGER')
+ensureColumn('tasks', 'reviewDeadlineAt', 'reviewDeadlineAt INTEGER')
+ensureColumn('tasks', 'revisionCount', 'revisionCount INTEGER NOT NULL DEFAULT 0')
+ensureColumn('tasks', 'revisionRequest', 'revisionRequest TEXT')
 
 // ---------------------------------------------------------------------------
 // Collection load/save
@@ -213,8 +216,8 @@ const stmts = {
   },
   tasks: {
     insert: db.prepare(
-      `INSERT OR REPLACE INTO tasks (id, task, agentId, status, executionId, ts, escrowTaskId, consumer, amountEth, txHash, payoutEth, feeEth, paidAt, auditId, ownerId)
-       VALUES (@id, @task, @agentId, @status, @executionId, @ts, @escrowTaskId, @consumer, @amountEth, @txHash, @payoutEth, @feeEth, @paidAt, @auditId, @ownerId)`
+      `INSERT OR REPLACE INTO tasks (id, task, agentId, status, executionId, ts, escrowTaskId, consumer, amountEth, txHash, payoutEth, feeEth, paidAt, auditId, ownerId, reviewDeadlineAt, revisionCount, revisionRequest)
+       VALUES (@id, @task, @agentId, @status, @executionId, @ts, @escrowTaskId, @consumer, @amountEth, @txHash, @payoutEth, @feeEth, @paidAt, @auditId, @ownerId, @reviewDeadlineAt, @revisionCount, @revisionRequest)`
     ),
     all: db.prepare('SELECT * FROM tasks'),
   },
@@ -277,7 +280,7 @@ export function dbSaveAll({ users, agents, executions, audits, tasks, config, fe
     )
     executions.forEach((e) => stmts.executions.insert.run({ ...e, success: e.success ? 1 : 0 }))
     audits.forEach((a) => stmts.audits.insert.run(a))
-    tasks.forEach((t) => stmts.tasks.insert.run({ executionId: null, escrowTaskId: null, consumer: null, amountEth: null, txHash: null, payoutEth: null, feeEth: null, paidAt: null, auditId: null, ownerId: null, ...t }))
+    tasks.forEach((t) => stmts.tasks.insert.run({ executionId: null, escrowTaskId: null, consumer: null, amountEth: null, txHash: null, payoutEth: null, feeEth: null, paidAt: null, auditId: null, ownerId: null, reviewDeadlineAt: null, revisionCount: 0, revisionRequest: null, ...t }))
     Object.entries(config).forEach(([k, v]) => stmts.config.upsert.run(k, JSON.stringify(v)))
     ;(feedPosts || []).forEach((p) => stmts.feed_posts.insert.run({ ...p, audit: JSON.stringify(p.audit || null) }))
     ;(feedReactions || []).forEach((r) => stmts.feed_reactions.insert.run(r))
@@ -293,8 +296,8 @@ export function dbSaveAll({ users, agents, executions, audits, tasks, config, fe
     for (const [table, records] of Object.entries(collections)) {
       const provenance = db.prepare(`UPDATE ${table} SET source = ?, model = ? WHERE id = ?`)
       const selected = JSON.parse(db.prepare("SELECT value FROM config WHERE key = 'runtime'").get()?.value || '{}')
-      const source = selected.provider || process.env.AI_PROVIDER || 'gemini'
-      const model = source === 'openai' ? selected.openaiModel || process.env.OPENAI_MODEL || 'gpt-4.1-mini' : selected.geminiModel || process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
+      const source = 'gemini'
+      const model = selected.geminiModel || process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
       for (const record of records) provenance.run(record.source || source, record.model || model, record.id)
     }
   })

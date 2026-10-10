@@ -5,8 +5,10 @@ import './env.js'
 //    chain state before any off-chain effect is applied."
 //
 // The backend NEVER trusts a client-submitted txHash. It reads the receipt
-// from Base Sepolia, confirms the tx hit the AgentFactory, and parses the
-// AgentMinted event — owner and metadataHash must match the request.
+// from Base Sepolia and parses the AgentMinted event emitted by AgentFactory —
+// owner and metadataHash must match the request. The top-level transaction
+// recipient may be a wallet smart-account/delegation wrapper that forwards
+// the call to AgentFactory.
 // ---------------------------------------------------------------------------
 
 import { createPublicClient, http, keccak256, toBytes, getAddress, parseAbiItem, decodeEventLog } from 'viem'
@@ -70,11 +72,9 @@ export async function verifyMint(txHash, expectedOwner, expectedMetadataHash) {
   }
   if (!receipt) return { ok: false, error: 'transaction not found on chain' }
   if (receipt.status !== 'success') return { ok: false, error: 'transaction reverted on chain' }
-  if (getAddress(receipt.to || "0x0000000000000000000000000000000000000000") !== getAddress(AGENT_FACTORY_ADDRESS)) {
-    return { ok: false, error: 'transaction did not call AgentFactory' }
-  }
-
-  // Parse AgentMinted events from the receipt logs
+  // Parse AgentMinted events from the receipt logs. Requiring the event to be
+  // emitted by AgentFactory proves the mint reached that contract while also
+  // supporting EIP-7702/smart-account transactions whose outer `to` differs.
   const logs = receipt.logs
     .filter((l) => l.address.toLowerCase() === AGENT_FACTORY_ADDRESS.toLowerCase())
     .map((l) => {

@@ -173,12 +173,22 @@ export async function runSwarmAnalysis({ task, agentIds, count, ownerId }) {
 }
 
 // Recent runs, newest first, with agent names resolved for the UI.
-export function recentSwarmRuns(limit = 20) {
+export function recentSwarmRuns(limit = 20, ownerId = null) {
   return [...store.swarmRuns]
+    .filter((run) => !ownerId || run.ownerId === ownerId)
     .sort((a, b) => b.startedAt - a.startedAt)
     .slice(0, limit)
     .map((r) => ({
-      ...r,
+      id: r.id,
+      task: r.task,
+      agentIds: r.agentIds,
+      status: r.status,
+      startedAt: r.startedAt,
+      finishedAt: r.finishedAt,
+      results: r.results,
+      merged: r.merged,
+      synthesis: r.synthesis,
+      error: r.error,
       agents: r.agentIds.map((id) => {
         const a = getAgent(id)
         return a ? { id, name: a.name, role: a.role } : { id, name: id, role: 'unknown' }

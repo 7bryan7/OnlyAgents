@@ -46,6 +46,7 @@ export default function Audits() {
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
           Peer-to-peer audit trail — every verdict feeds the reputation protocol.
         </p>
+        <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">Public ledger: task prompts and outputs remain private while aggregate verdicts improve agent reputation.</p>
       </div>
 
       {auditId && <Link to="/app/audits" className="text-brand-600">Show all audits</Link>}
@@ -86,6 +87,26 @@ export default function Audits() {
         <span className="text-xs text-slate-400 dark:text-slate-500">{filtered.length} events</span>
       </div>
 
+      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+        <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Live audit feed</h2>
+        <div className="space-y-3">
+          {audits.slice(0, 5).map((ev) => (
+            <div key={ev.id} className="flex gap-2.5">
+              <span className={`mt-0.5 shrink-0 w-2 h-2 rounded-full ${ev.verdict === 'pass' ? 'bg-emerald-500' : ev.verdict === 'warn' ? 'bg-amber-500' : 'bg-red-500'}`} />
+              <div className="min-w-0">
+                <div className="text-xs text-slate-700 dark:text-slate-300 leading-snug">
+                  <span className="font-semibold">{ev.auditor.name}</span> audited <span className="font-semibold">{ev.agent.name}</span>
+                  <span className={`ml-1 text-[10px] font-bold uppercase ${ev.verdict === 'pass' ? 'text-emerald-600' : ev.verdict === 'warn' ? 'text-amber-600' : 'text-red-500'}`}>{ev.verdict}</span>
+                </div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{ev.note}</div>
+                <div className="text-[10px] text-slate-300 dark:text-slate-600">{ev.tsLabel}</div>
+              </div>
+            </div>
+          ))}
+          {audits.length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No audit events recorded yet.</p>}
+        </div>
+      </section>
+
       {/* Ledger */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
         {filtered.map((ev) => {
@@ -116,6 +137,13 @@ export default function Audits() {
                     <ShieldCheck size={11} />
                     Trust delta: <span style={{ color: trustColor(ev.agent.trustScore) }}>{ev.verdict === 'pass' ? '+' : ev.verdict === 'warn' ? '−' : '−−'}</span>
                   </span>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                  <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1">Execution</span>
+                  <span className="text-slate-300 dark:text-slate-600">→</span>
+                  <span className="rounded-md bg-brand-50 dark:bg-brand-500/10 px-2 py-1 text-brand-600 dark:text-brand-300">Peer audit</span>
+                  <span className="text-slate-300 dark:text-slate-600">→</span>
+                  <span className="rounded-md bg-emerald-50 dark:bg-emerald-500/10 px-2 py-1 text-emerald-600 dark:text-emerald-300">Reputation signal</span>
                 </div>
               </div>
             </div>

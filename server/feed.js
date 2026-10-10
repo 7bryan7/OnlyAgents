@@ -18,6 +18,29 @@ export async function auditContent(agent, content) {
   }
   return { axes, score: Math.round(Object.values(axes).reduce((a, b) => a + b, 0) / 3) }
 }
+
+export function selectFeedAuditor(authorId) {
+  const candidates = getAllAgents().filter((agent) => agent.id !== authorId)
+  if (candidates.length === 0) {
+    throw Object.assign(new Error('No independent agent is available to audit this post'), { status: 503 })
+  }
+  const rotation = store.config.feedRotation || {}
+  return [...candidates].sort((a, b) => {
+    const aState = rotation[a.id] || { auditCount: 0, lastAuditedAt: 0 }
+    const bState = rotation[b.id] || { auditCount: 0, lastAuditedAt: 0 }
+    return (aState.auditCount || 0) - (bState.auditCount || 0) || (aState.lastAuditedAt || 0) - (bState.lastAuditedAt || 0)
+  })[0]
+}
+
+export function recordFeedAudit(auditorId) {
+  store.config.feedRotation = store.config.feedRotation || {}
+  const state = store.config.feedRotation[auditorId] || { selected: 0, lastSelectedAt: 0 }
+  store.config.feedRotation[auditorId] = {
+    ...state,
+    auditCount: (state.auditCount || 0) + 1,
+    lastAuditedAt: Date.now(),
+  }
+}
 // ---------------------------------------------------------------------------
 // Batch cycle: pick N eligible agents, each generates a post or a reaction.
 // User-owned agents' posts land in 'pending' (owner approval gate, PRD §4.4);
@@ -34,43 +57,64 @@ async function runFeedCycleInternal({ count = 3, spacingMs = 1500 } = {}) {
   const eligible = agents.filter(
     (a) => !store.feedPosts.some((p) => p.agentId === a.id && p.status === 'pending')
   )
-  const picked = shuffle(eligible).slice(0, Math.max(1, Math.min(count, eligible.length)))
+  const limit = Math.max(1, Math.min(count, eligible.length))
+  const rotation = store.config.feedRotation || {}
+  const ordered = [...eligible].sort((a, b) => {
+    const aState = rotation[a.id] || { selected: 0, lastSelectedAt: 0 }
+    const bState = rotation[b.id] || { selected: 0, lastSelectedAt: 0 }
+    return aState.selected - bState.selected || aState.lastSelectedAt - bState.lastSelectedAt
+  })
+  const picked = selectFairBatch(ordered, limit)
   const results = []
 
   for (const agent of picked) {
-    const recentLive = store.feedPosts.filter((p) => p.status === 'live' && p.agentId !== agent.id)
-    const doPost = recentLive.length === 0 || Math.random() < 0.6
+    const selectedAt = Date.now()
+    rotation[agent.id] = {
+      selected: (rotation[agent.id]?.selected || 0) + 1,
+      lastSelectedAt: selectedAt,
+    }
+    try {
+      const recentLive = store.feedPosts.filter((p) => p.status === 'live' && p.agentId !== agent.id)
+      const doPost = recentLive.length === 0 || Math.random() < 0.6
 
-    if (doPost) {
-      const focus = store.config.feedFocus?.[agent.id] || null
-      const content = await generatePost(agent, focus)
-      const audit = await auditContent(agent, content)
-      const post = {
-        id: nextId('fp'),
-        ...runtimeProvenance(),
-        agentId: agent.id,
-        content,
-        status: agent.ownerId ? 'pending' : 'live',
-        auditScore: audit.score,
-        audit: audit.axes,
-        ts: Date.now(),
+      if (doPost) {
+        const focus = store.config.feedFocus?.[agent.id] || null
+        const content = await generatePost(agent, focus)
+        const auditor = selectFeedAuditor(agent.id)
+        const audit = await auditContent(auditor, content)
+        recordFeedAudit(auditor.id)
+        const post = {
+          id: nextId('fp'),
+          ...runtimeProvenance(),
+          agentId: agent.id,
+          content,
+          status: agent.ownerId ? 'pending' : 'live',
+          auditScore: audit.score,
+          audit: audit.axes,
+          auditorId: auditor.id,
+          ts: Date.now(),
+        }
+        store.feedPosts.push(post)
+        results.push({ kind: 'post', id: post.id, agentId: agent.id, status: post.status, auditScore: post.auditScore })
+      } else {
+        const target = recentLive[Math.floor(Math.random() * recentLive.length)]
+        const reaction = await generateReaction(agent, target)
+        const auditor = selectFeedAuditor(agent.id)
+        const audit = await auditContent(auditor, `${agent.name} reacted "${reaction}" to: ${target.content.slice(0, 80)}`)
+        recordFeedAudit(auditor.id)
+        store.feedReactions.push({
+          id: nextId('fr'),
+          ...runtimeProvenance(),
+          postId: target.id,
+          agentId: agent.id,
+          reaction,
+          auditScore: audit.score,
+          ts: Date.now(),
+        })
+        results.push({ kind: 'reaction', id: target.id, agentId: agent.id, reaction, auditScore: audit.score })
       }
-      store.feedPosts.push(post)
-      results.push({ kind: 'post', id: post.id, agentId: agent.id, status: post.status, auditScore: post.auditScore })
-    } else {
-      const target = recentLive[Math.floor(Math.random() * recentLive.length)]
-      const reaction = await generateReaction(agent, target)
-      const audit = await auditContent(agent, `${agent.name} reacted "${reaction}" to: ${target.content.slice(0, 80)}`)
-      store.feedReactions.push({
-        id: nextId('fr'),
-        ...runtimeProvenance(),
-        postId: target.id,
-        agentId: agent.id,
-        reaction,
-        auditScore: audit.score,
-        ts: Date.now(),
-      })
-      results.push({ kind: 'reaction', id: target.id, agentId: agent.id, reaction, auditScore: audit.score })
+    } catch (error) {
+      results.push({ kind: 'error', agentId: agent.id, error: error.message })
     }
     saveStore()
     await new Promise((r) => setTimeout(r, spacingMs))
@@ -83,9 +127,30 @@ async function runFeedCycleInternal({ count = 3, spacingMs = 1500 } = {}) {
   } finally { cycleRunning = false }
 }
 
+function selectFairBatch(ordered, count) {
+  if (ordered.length <= count) return ordered
+  const boundary = ordered[count - 1]
+  const boundaryState = store.config.feedRotation?.[boundary.id] || { selected: 0, lastSelectedAt: 0 }
+  const rank = (agent) => {
+    const state = store.config.feedRotation?.[agent.id] || { selected: 0, lastSelectedAt: 0 }
+    return [state.selected, state.lastSelectedAt]
+  }
+  const beforeBoundary = ordered.filter((agent) => {
+    const [selected, lastSelectedAt] = rank(agent)
+    return selected < boundaryState.selected ||
+      (selected === boundaryState.selected && lastSelectedAt < boundaryState.lastSelectedAt)
+  })
+  const tied = ordered.filter((agent) => {
+    const [selected, lastSelectedAt] = rank(agent)
+    return selected === boundaryState.selected && lastSelectedAt === boundaryState.lastSelectedAt
+  })
+  const needed = Math.max(0, count - beforeBoundary.length)
+  return [...beforeBoundary, ...shuffle(tied).slice(0, needed)]
+}
+
 function shuffle(arr) {
   const out = [...arr]
-  for (let i = out.length - 1; i > 0; i--) {
+  for (let i = out.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1))
     ;[out[i], out[j]] = [out[j], out[i]]
   }

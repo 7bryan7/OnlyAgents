@@ -145,6 +145,22 @@ test('feed owner actions enforce the authenticated identity', async () => {
   assert.equal((await request('/feed/pending?email=test-user@example.test', undefined, 'other-user')).data.pending.length, 0)
 })
 
+test('custom agents can generate focused pending posts on demand', async () => {
+  const focus = await request('/feed/focus', { agentId: 'cu-10000', focus: 'Explain testing strategy clearly.' })
+  assert.equal(focus.status, 200)
+  assert.equal(focus.data.focus, 'Explain testing strategy clearly.')
+  const generated = await request('/feed/agents/cu-10000/generate', {})
+  assert.equal(generated.status, 201)
+  assert.equal(generated.data.post.status, 'pending')
+  assert.equal(generated.data.post.agentId, 'cu-10000')
+  assert.ok(generated.data.post.auditorId)
+  assert.notEqual(generated.data.post.auditorId, 'cu-10000')
+  assert.ok(generated.data.post.auditor)
+  assert.match(generated.data.post.content, /Test fixture/)
+  assert.equal((await request('/feed/agents/cu-10000/generate', {})).status, 409)
+  assert.equal((await request('/feed/agents/cu-10000/generate', {}, 'other-user')).status, 403)
+})
+
 test('configuration validation is atomic and profile identity cannot be supplied by callers', async () => {
   const before = structuredClone(store.config)
   assert.equal((await request('/config', { reputation: { trust: 'wrong' } }, 'test-user', 'PUT')).status, 400)
@@ -223,26 +239,24 @@ test('cookie sessions are hashed, reject CSRF, survive reload and revoke on logo
   assert.equal((await fetch(base + '/api/auth/me', { headers: { Cookie: cookie } })).status, 401)
 })
 
-test('only admins can change global settings and runtime; OpenAI generates real-shaped task/audit/swarm responses', async () => {
+test('only admins can change global settings and Gemini runtime generates real-shaped responses', async () => {
   assert.equal((await request('/config', { hireThreshold: 50 }, 'other-user', 'PUT')).status, 403)
-  assert.equal((await request('/runtime', { provider: 'openai' }, 'other-user', 'PUT')).status, 403)
+  assert.equal((await request('/runtime', { geminiModel: 'gemini-test-model' }, 'other-user', 'PUT')).status, 403)
   assert.equal((await request('/runtime', { provider: 'custom' }, 'test-user', 'PUT')).status, 400)
-  process.env.OPENAI_API_KEY = 'test-fixture-openai'
-  assert.equal((await request('/runtime', { provider: 'openai' }, 'test-user', 'PUT')).status, 200)
+  assert.equal((await request('/runtime', { geminiModel: 'gemini-test-model' }, 'test-user', 'PUT')).status, 200)
   try {
-    const task = await request('/tasks', { task: 'Write a release plan using OpenAI' })
-    assert.equal(task.data.execution.source, 'openai')
-    assert.equal(task.data.execution.model, 'gpt-4.1-mini')
+    const task = await request('/tasks', { task: 'Write a release plan using Gemini' })
+    assert.equal(task.data.execution.source, 'gemini')
+    assert.equal(task.data.execution.model, 'gemini-test-model')
     const audit = await request(`/tasks/${task.data.task.id}/audit`, {})
-    assert.equal(audit.data.audit.source, 'openai')
+    assert.equal(audit.data.audit.source, 'gemini')
     assert.equal(audit.data.audit.verdict, 'pass')
     const swarm = await request('/swarms/analyze', { task: 'Review the release plan', count: 3 })
     assert.equal(swarm.data.run.status, 'done')
-    assert.ok(swarm.data.run.results.every((r) => r.source === 'openai'))
-    assert.equal(db.prepare('SELECT source FROM executions WHERE id = ?').get(task.data.execution.id).source, 'openai')
-    const requestBody = fixture.state.requests.find((r) => r.provider === 'openai').body
-    assert.equal(requestBody.store, false)
-    assert.equal(requestBody.model, 'gpt-4.1-mini')
+    assert.ok(swarm.data.run.results.every((r) => r.source === 'gemini'))
+    assert.equal(db.prepare('SELECT source FROM executions WHERE id = ?').get(task.data.execution.id).source, 'gemini')
+    const requestBody = fixture.state.requests.at(-1).body
+    assert.equal(requestBody.generationConfig.maxOutputTokens, 700)
     assert.equal((await request('/runtime/check', {})).data.check.ok, true)
   } finally { await request('/runtime', { provider: 'gemini' }, 'test-user', 'PUT') }
 })

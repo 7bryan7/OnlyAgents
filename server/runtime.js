@@ -1,31 +1,31 @@
 import './env.js'
 import { db } from './db.js'
 import { consumeModelCall, withModelSlot, requestContext } from './limits.js'
-const defaults = { provider: process.env.AI_PROVIDER || 'gemini', geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-lite-latest', openaiModel: process.env.OPENAI_MODEL || 'gpt-4.1-mini' }
-let settings = { ...defaults, ...JSON.parse(db.prepare("SELECT value FROM config WHERE key = 'runtime'").get()?.value || '{}') }
+const defaults = { geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-lite-latest' }
+const savedSettings = JSON.parse(db.prepare("SELECT value FROM config WHERE key = 'runtime'").get()?.value || '{}')
+let settings = { ...defaults, geminiModel: savedSettings.geminiModel || defaults.geminiModel }
 export let MODE
 export let MODEL
-const keyFor = (provider) => process.env[provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY'] || ''
+const key = () => process.env.GEMINI_API_KEY || ''
 function refresh() {
-  const key = keyFor(settings.provider)
-  MODE = key && !/^(your-|replace|example)/i.test(key) ? settings.provider : 'unconfigured'
-  MODEL = settings.provider === 'openai' ? settings.openaiModel : settings.geminiModel
+  const value = key()
+  MODE = value && !/^(your-|replace|example)/i.test(value) ? 'gemini' : 'unconfigured'
+  MODEL = settings.geminiModel
 }
 refresh()
 export function runtimeStatus() {
-  return { ...settings, mode: MODE, model: MODEL, providers: ['gemini', 'openai'].map((id) => ({ id, configured: !!keyFor(id) && !/^(your-|replace|example)/i.test(keyFor(id)) })), lastCheck: JSON.parse(db.prepare("SELECT value FROM config WHERE key = 'runtimeCheck'").get()?.value || 'null') }
+  return { ...settings, provider: 'gemini', mode: MODE, model: MODEL, providers: [{ id: 'gemini', configured: !!key() && !/^(your-|replace|example)/i.test(key()) }], lastCheck: JSON.parse(db.prepare("SELECT value FROM config WHERE key = 'runtimeCheck'").get()?.value || 'null') }
 }
 export function updateRuntime(patch) {
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).some((k) => !['provider', 'geminiModel', 'openaiModel'].includes(k))) throw Object.assign(new Error('Only provider, geminiModel and openaiModel can be updated.'), { status: 400 })
-  if (patch.provider !== undefined && !['gemini', 'openai'].includes(patch.provider)) throw Object.assign(new Error('provider must be gemini or openai.'), { status: 400 })
-  for (const field of ['geminiModel', 'openaiModel']) if (patch[field] !== undefined && (typeof patch[field] !== 'string' || !/^[a-zA-Z0-9._-]{1,100}$/.test(patch[field]))) throw Object.assign(new Error('Invalid model identifier.'), { status: 400 })
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).some((k) => k !== 'geminiModel')) throw Object.assign(new Error('Only geminiModel can be updated.'), { status: 400 })
+  if (patch.geminiModel !== undefined && (typeof patch.geminiModel !== 'string' || !/^[a-zA-Z0-9._-]{1,100}$/.test(patch.geminiModel))) throw Object.assign(new Error('Invalid model identifier.'), { status: 400 })
   settings = { ...settings, ...patch }
   db.prepare("INSERT INTO config (key, value) VALUES ('runtime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(settings))
   refresh()
   return runtimeStatus()
 }
 export function requireRuntime() {
-  if (runtimeProvenance().source === 'unconfigured') throw Object.assign(new Error(`Set ${settings.provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY'} in .env and restart the backend.`), { status: 503 })
+  if (runtimeProvenance().source === 'unconfigured') throw Object.assign(new Error('Set GEMINI_API_KEY in .env and restart the backend.'), { status: 503 })
 }
 export function runtimeProvenance() { return requestContext.getStore()?.runtime || { source: MODE, model: MODEL } }
 export function withRuntimeContext(work) {
@@ -36,13 +36,13 @@ export function extractText(data) {
   return (data?.candidates?.[0]?.content?.parts || []).filter((p) => p.text && !p.thought).map((p) => p.text).join('').trim()
 }
 async function providerRequest(provider, model, body) {
-  const key = keyFor(provider)
-  const url = provider === 'openai' ? 'https://api.openai.com/v1/responses' : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
+  const providerKey = key()
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
   return withModelSlot(async () => {
     const deadline = Date.now() + 90000
     for (let attempt = 0; attempt < 3; attempt++) {
       let res
-      try { res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(provider === 'openai' ? { Authorization: 'Bearer ' + key } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body), signal: AbortSignal.timeout(Math.max(1, Math.min(30000, deadline - Date.now()))) }) }
+      try { res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': providerKey }, body: JSON.stringify(body), signal: AbortSignal.timeout(Math.max(1, Math.min(30000, deadline - Date.now()))) }) }
       catch { throw Object.assign(new Error(`${provider} request timed out or could not connect.`), { status: 502 }) }
       if (res.ok) return res.json()
       if ((res.status === 429 || res.status >= 500) && attempt < 2 && Date.now() + 10000 < deadline) {
@@ -54,7 +54,7 @@ async function providerRequest(provider, model, body) {
       }
       let detail = ''
       try { detail = (await res.json())?.error?.message || '' } catch { /* preserve HTTP status */ }
-      if (typeof detail === 'string' && key) detail = detail.replaceAll(key, '[redacted]').slice(0, 500)
+      if (typeof detail === 'string' && providerKey) detail = detail.replaceAll(providerKey, '[redacted]').slice(0, 500)
       throw Object.assign(new Error(`${provider} returned HTTP ${res.status}${detail ? ': ' + detail : '. Check API key, model access and quota.'}`), { status: 502 })
     }
   })
@@ -63,16 +63,13 @@ export async function generateResult(prompt, { persona, json = false, maxOutputT
   requireRuntime()
   const { source, model } = runtimeProvenance()
   consumeModelCall()
-  const body = source === 'openai' ? {
-    model, input: prompt, instructions: (persona || '') + (json ? ' Return a JSON object only.' : ''), max_output_tokens: Math.max(16, maxOutputTokens), store: false,
-    ...(model.startsWith('gpt-4') ? { temperature } : {}), ...(json ? { text: { format: { type: 'json_object' } } } : {}),
-  } : {
+  const body = {
     ...(persona ? { systemInstruction: { parts: [{ text: persona }] } } : {}), contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: { temperature, maxOutputTokens, ...(json ? { responseMimeType: 'application/json' } : {}) },
   }
   const data = await providerRequest(source, model, body)
-  const text = source === 'openai' ? (data.output || []).filter((item) => item.type === 'message').flatMap((item) => item.content || []).filter((item) => item.type === 'output_text').map((item) => item.text).join('').trim() : extractText(data)
-  if (!text || (source === 'openai' && data.status && data.status !== 'completed')) throw Object.assign(new Error(`${source} returned no complete usable output.`), { status: 502 })
+  const text = extractText(data)
+  if (!text) throw Object.assign(new Error(`${source} returned no complete usable output.`), { status: 502 })
   return { text, source, model }
 }
 export async function generateText(prompt, options) { return (await generateResult(prompt, options)).text }

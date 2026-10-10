@@ -15,7 +15,7 @@ export function walletStatus(req, res) {
 export function walletChallenge(req, res) {
   const wallet = addressOf(req.body?.walletAddress)
   const expiresAt = Date.now() + 5 * 60000
-  const message = `OnlyAgent wallet ownership verification\nOrigin: ${process.env.APP_ORIGIN || 'http://localhost:5173'}\nAccount: ${req.user.email}\nWallet: ${wallet}\nNonce: ${randomBytes(24).toString('hex')}\nExpires: ${new Date(expiresAt).toISOString()}\nThis signature links your wallet to your signed-in account. It does not authorize a payment.`
+  const message = `OnlyAgent wallet ownership verification\nOrigin: ${process.env.APP_ORIGIN || 'http://localhost:3000'}\nAccount: ${req.user.email}\nWallet: ${wallet}\nNonce: ${randomBytes(24).toString('hex')}\nExpires: ${new Date(expiresAt).toISOString()}\nThis signature links your wallet to your signed-in account. It does not authorize a payment.`
   db.prepare('INSERT INTO wallet_challenges VALUES (?, ?, ?, ?) ON CONFLICT(ownerId) DO UPDATE SET wallet=excluded.wallet, message=excluded.message, expiresAt=excluded.expiresAt').run(req.user.email, wallet, message, expiresAt)
   res.json({ message, expiresAt })
 }

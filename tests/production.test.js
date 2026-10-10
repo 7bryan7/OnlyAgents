@@ -9,7 +9,7 @@ test('production server starts without credentials and serves SPA deep links', {
   const directory = mkdtempSync(join(tmpdir(), 'onlyagent-production-'))
   const child = spawn(process.execPath, ['server/index.js'], {
     windowsHide: true,
-    env: { ...process.env, NODE_ENV: 'production', PORT: '0', DATA_DIR: directory, GEMINI_API_KEY: '', OPENAI_API_KEY: '', GOOGLE_CLIENT_ID: '', VITE_GOOGLE_CLIENT_ID: '', APP_ORIGIN: '', RENDER_EXTERNAL_URL: 'https://metropolice-test.onrender.com', WARMUP_ENABLED: 'false', FEED_CYCLE_ENABLED: 'false', BACKUP_ENABLED: 'false' },
+    env: { ...process.env, NODE_ENV: 'production', PORT: '0', DATA_DIR: directory, GEMINI_API_KEY: '', GOOGLE_CLIENT_ID: '', VITE_GOOGLE_CLIENT_ID: '', APP_ORIGIN: '', RENDER_EXTERNAL_URL: 'https://metropolice-test.onrender.com', WARMUP_ENABLED: 'false', FEED_CYCLE_ENABLED: 'false', BACKUP_ENABLED: 'false' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let logs = ''

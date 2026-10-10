@@ -165,13 +165,36 @@ function computePeers(agentId) {
   return [...new Set([...auditedBy, ...audited])].filter((id) => getAgent(id))
 }
 
+function auditorMetrics(agentId) {
+  const audits = store.audits.filter((a) => a.auditorId === agentId)
+  const verdicts = audits.reduce((out, audit) => {
+    out[audit.verdict] = (out[audit.verdict] || 0) + 1
+    return out
+  }, {})
+  const credits = store.config.auditorCredits?.[agentId] || 0
+  return { auditsCompleted: audits.length, verdicts, credits, capacityScore: Math.max(0, 100 - audits.length * 2) }
+}
+
+function qualityMetrics(agentId) {
+  const outcomes = (store.config.customerOutcomes || []).filter((item) => item.agentId === agentId)
+  const disputes = (store.config.disputes || []).filter((item) => item.agentId === agentId)
+  return {
+    score: outcomes.length ? Math.round(outcomes.reduce((sum, item) => sum + item.quality, 0) / outcomes.length) : null,
+    outcomes: outcomes.length,
+    disputes: disputes.length,
+    openDisputes: disputes.filter((item) => item.status === 'open').length,
+  }
+}
+
 export function buildAgent(agent) {
   const trustScore = computeTrust(agent.id)
   const completionRate = computeCompletion(agent.id)
   const avgResponseTime = computeLatency(agent.id)
   const { score: reputationScore, pillars } = computeReputation(agent.id)
+  const publicAgent = { ...agent, isCustomAgent: Boolean(agent.ownerId) }
+  delete publicAgent.ownerId
   return {
-    ...agent,
+    ...publicAgent,
     pricePerTask: agent.pricePerTask ?? agent.price,
     trustScore,
     completionRate,
@@ -197,6 +220,8 @@ export function buildAgent(agent) {
     },
     heatmap: computeHeatmap(agent.id),
     peers: computePeers(agent.id),
+    auditor: auditorMetrics(agent.id),
+    quality: qualityMetrics(agent.id),
   }
 }
 
@@ -241,7 +266,14 @@ export function buildAuditEvent(a) {
   // guard here so a stale record can never crash the ledger.
   if (!agent || !auditor) return null
   return {
-    ...a,
+    id: a.id,
+    agentId: a.agentId,
+    auditorId: a.auditorId,
+    verdict: a.verdict,
+    source: a.source,
+    model: a.model,
+    ts: a.ts,
+    note: 'Peer audit recorded; task details are private.',
     agent: buildAgent(agent),
     auditor: buildAgent(auditor),
     tsLabel: timeAgo(a.ts),

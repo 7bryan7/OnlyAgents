@@ -63,6 +63,14 @@ export default function TaskRunner() {
   }
 
   const busy = running || auditing
+  const executionStep = running ? 2 : auditing ? 4 : result ? (audit ? 5 : 3) : 1
+  const steps = [
+    { label: 'Submitted', icon: Play },
+    { label: 'Routed', icon: ArrowRight },
+    { label: 'Executed', icon: Bot },
+    { label: 'Peer audit', icon: ShieldCheck },
+    { label: 'Verified', icon: CheckCircle2 },
+  ]
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
@@ -70,26 +78,26 @@ export default function TaskRunner() {
         <Zap size={16} className="text-brand-600 dark:text-brand-400" />
         <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Live task runner</h3>
         <span className="ml-auto text-[10px] text-slate-400 dark:text-slate-500">
-          {mode === 'gemini' ? 'Gemini runtime' : mode === 'openai' ? 'OpenAI runtime' : mode === 'unconfigured' ? 'AI key required' : 'Backend offline'}
+          {mode === 'gemini' ? 'Gemini runtime' : mode === 'unconfigured' ? 'AI key required' : 'Backend offline'}
         </span>
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
         Submit a task — the orchestrator routes it to the highest-trust agent, then a peer audits the output.
       </p>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <input
           maxLength={500}
           value={task}
           onChange={(e) => setTask(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && execute()}
           placeholder="Describe a task for the swarm…"
-          className="flex-1 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-brand-300 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-500/20 outline-none text-sm"
+          className="min-w-0 w-full sm:flex-1 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-transparent focus:bg-white dark:focus:bg-slate-900 focus:border-brand-300 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-100 dark:focus:ring-brand-500/20 outline-none text-sm"
         />
         <select
           value={stage}
           onChange={(e) => setStage(e.target.value)}
-          className="px-2.5 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-transparent outline-none text-xs text-slate-600 dark:text-slate-400"
+          className="min-w-0 flex-1 sm:flex-none px-2.5 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-transparent outline-none text-xs text-slate-600 dark:text-slate-400"
           title="Route to a specific lifecycle stage (empty = auto)"
         >
           <option value="">Auto-route</option>
@@ -99,8 +107,8 @@ export default function TaskRunner() {
         </select>
         <button
           onClick={execute}
-          disabled={busy || !task.trim() || !['gemini', 'openai'].includes(mode)}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          disabled={busy || !task.trim() || mode !== 'gemini'}
+          className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
           Run
@@ -125,6 +133,24 @@ export default function TaskRunner() {
 
       {result && (
         <div className="mt-4 space-y-3">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 px-3 py-3">
+            <div className="flex items-center justify-between gap-2">
+              {steps.map((step, index) => {
+                const Icon = step.icon
+                const complete = index < executionStep
+                const current = index === executionStep - 1
+                return (
+                  <div key={step.label} className="flex items-center gap-1.5 min-w-0">
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${complete ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'} ${current ? 'ring-2 ring-brand-200 dark:ring-brand-500/30' : ''}`}>
+                      <Icon size={11} />
+                    </span>
+                    <span className={`hidden sm:block text-[10px] font-semibold ${complete ? 'text-brand-700 dark:text-brand-300' : 'text-slate-400'}`}>{step.label}</span>
+                    {index < steps.length - 1 && <span className={`hidden md:block w-4 lg:w-8 h-px ${index < executionStep - 1 ? 'bg-brand-500' : 'bg-slate-200 dark:bg-slate-700'}`} />}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
           {/* Routing + execution */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-2">

@@ -2,20 +2,18 @@ import { fleetHistory, periodValue, periodChange } from '../fleetMetrics'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ShieldCheck, CheckCircle2, Timer, RefreshCw, Bot, ArrowRight,
+  ShieldCheck, CheckCircle2, Timer, RefreshCw, ArrowRight, AlertTriangle, Activity,
 } from 'lucide-react'
 import KpiCard from '../components/KpiCard'
-import AgentCard from '../components/AgentCard'
 import Heatmap from '../components/Heatmap'
 import NetworkGraph from '../components/NetworkGraph'
-import TaskRunner from '../components/TaskRunner'
-import { TrustTrendChart, CompletionAreaChart, ResponseBarChart, TrustDistributionChart } from '../components/Charts'
+import { TrustDistributionChart } from '../components/Charts'
 import { STATUS_META, trustColor } from '../agentMeta'
 import { useData } from '../DataContext'
 
 export default function Dashboard() {
   const [timeRange, setTimeRange] = useState('7d')
-  const { agents, audits } = useData()
+  const { agents } = useData()
 
   const stats = useMemo(() => {
     if (agents.length === 0) return null
@@ -44,6 +42,9 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
+      <div className="w-full rounded-lg border border-brand-200 bg-brand-50/70 px-4 py-2 text-center text-xs font-semibold tracking-wide text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+        All Metrics Use Recorded Executions &amp; Peer Audits
+      </div>
       {/* Header */}
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
@@ -128,28 +129,22 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Trust trend — fleet average</h3>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">{timeRange}</span>
+      {/* Protocol pulse */}
+      <div className="rounded-2xl bg-gradient-to-br from-slate-950 via-brand-950 to-brand-900 p-5 text-white shadow-lg shadow-brand-900/10">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold"><Activity size={15} className="text-cyan-300" /> Protocol pulse</div>
+            <p className="mt-1 text-xs text-slate-300">A live view of the evidence powering agent reputation.</p>
           </div>
-          <TrustTrendChart data={period.trust} />
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot" /> Evidence network active
+          </span>
         </div>
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Completion rate — fleet average</h3>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">{timeRange}</span>
-          </div>
-          <CompletionAreaChart data={period.completion} />
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Response time — fleet average</h3>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">{timeRange}</span>
-          </div>
-          <ResponseBarChart data={period.response} />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <PulseMetric label="Agents online" value={stats.active} />
+          <PulseMetric label="Recorded runs" value={agents.reduce((sum, a) => sum + a.executionsCount, 0)} />
+          <PulseMetric label="Peer audits" value={agents.reduce((sum, a) => sum + a.auditsReceived, 0)} />
+          <PulseMetric label="High-confidence agents" value={agents.filter((a) => a.auditsReceived + a.tasksCompleted >= 100).length} />
         </div>
       </div>
 
@@ -168,12 +163,11 @@ export default function Dashboard() {
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
             <Heatmap data={heatmap} title="Fleet activity — 7 days × 24h" />
           </div>
-          <TaskRunner />
         </div>
       </div>
 
-      {/* Bottom row: distribution + top agents + audit feed */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* Bottom row: distribution + top agents */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Trust distribution</h3>
           <TrustDistributionChart agents={agents} />
@@ -211,54 +205,28 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Live audit feed</h3>
-            <Link to="/app/audits" className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 inline-flex items-center gap-1">
-              Ledger <ArrowRight size={12} />
-            </Link>
-          </div>
-          <div className="space-y-3">
-            {audits.slice(0, 5).map((ev) => (
-              <div key={ev.id} className="flex gap-2.5">
-                <span
-                  className={`mt-0.5 shrink-0 w-2 h-2 rounded-full ${
-                    ev.verdict === 'pass' ? 'bg-emerald-500' : ev.verdict === 'warn' ? 'bg-amber-500' : 'bg-red-500'
-                  }`}
-                />
-                <div className="min-w-0">
-                  <div className="text-xs text-slate-700 dark:text-slate-300 leading-snug">
-                    <span className="font-semibold">{ev.auditor.name}</span> audited{' '}
-                    <span className="font-semibold">{ev.agent.name}</span>
-                    <span className={`ml-1 text-[10px] font-bold uppercase ${ev.verdict === 'pass' ? 'text-emerald-600' : ev.verdict === 'warn' ? 'text-amber-600' : 'text-red-500'}`}>
-                      {ev.verdict}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{ev.note}</div>
-                  <div className="text-[10px] text-slate-300 dark:text-slate-600">{ev.tsLabel}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+      </div>
+
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <AlertTriangle size={15} className="text-amber-500" />
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Needs attention</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <AttentionItem label="Building evidence" value={agents.filter((a) => a.auditsReceived + a.tasksCompleted < 10).length} detail="Agents with limited history" />
+          <AttentionItem label="Degraded or stalled" value={agents.filter((a) => ['degraded', 'stalled'].includes(a.status)).length} detail="Review before routing work" />
+          <AttentionItem label="Below hire threshold" value={agents.filter((a) => !a.hireable).length} detail="Still earning marketplace access" />
         </div>
       </div>
 
-      {/* Featured agents */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 inline-flex items-center gap-2">
-            <Bot size={15} className="text-brand-600 dark:text-brand-400" /> Featured agents
-          </h3>
-          <Link to="/app/marketplace" className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">
-            View all →
-          </Link>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {stats.topAgents.map((a) => (
-            <AgentCard key={a.id} agent={a} compact />
-          ))}
-        </div>
-      </div>
     </div>
   )
+}
+
+function PulseMetric({ label, value }) {
+  return <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5"><div className="text-lg font-bold tabular-nums">{value.toLocaleString()}</div><div className="text-[10px] text-slate-300">{label}</div></div>
+}
+
+function AttentionItem({ label, value, detail }) {
+  return <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5"><div className="flex items-center justify-between"><span className="text-xs font-semibold">{label}</span><span className="text-lg font-bold tabular-nums text-slate-900 dark:text-slate-100">{value}</span></div><div className="text-[10px] text-slate-400 dark:text-slate-500">{detail}</div></div>
 }

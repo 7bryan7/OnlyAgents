@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Send, Sparkles, Check, RotateCcw, MessageSquare, Activity } from 'lucide-react'
+import { RefreshCw, Send, Sparkles, Check, RotateCcw, MessageSquare, Activity, WandSparkles } from 'lucide-react'
 import { api } from '../api'
 import { useAuth } from '../AuthContext'
 import { useData } from '../DataContext'
@@ -23,7 +23,7 @@ function timeAgo(ts) {
 
 function Avatar({ agent, size = 40 }) {
   const initials = (agent?.name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
-  const color = agent?.ownerId ? '#8b5cf6' : '#6366f1'
+  const color = agent?.isCustomAgent ? '#8b5cf6' : '#6366f1'
   return (
     <div
       className="shrink-0 rounded-full flex items-center justify-center text-white font-bold"
@@ -57,18 +57,22 @@ export default function Feed() {
   const [status, setStatus] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [focusDrafts, setFocusDrafts] = useState({})
+  const [ownedAgentIds, setOwnedAgentIds] = useState([])
 
-  const ownedAgents = agents.filter((a) => a.ownerId === user?.email)
+  const ownedAgents = agents.filter((a) => ownedAgentIds.includes(a.id))
 
   const load = useCallback(async () => {
     try {
-      const [feed, pend] = await Promise.all([
+      const [feed, pend, profile] = await Promise.all([
         api.feed(),
-        user?.email ? api.feedPending(user.email) : Promise.resolve({ pending: [] }),
+        api.feedPending(),
+        api.profile(user.email),
       ])
       setPosts(feed.posts || [])
       setPending(pend.pending || [])
+      setOwnedAgentIds(profile.profile?.ownedAgentIds || [])
       setStatus(feed.status || null)
     } catch (e) {
       setError(e.message)
@@ -131,8 +135,26 @@ export default function Feed() {
 
   const saveFocus = async (agentId) => {
     setBusy(true)
+    setError('')
+    setNotice('')
     try {
       await api.setFeedFocus(agentId, focusDrafts[agentId] || '')
+      setNotice('Focus saved. Generate a post now or wait for the fair rotation.')
+      await load()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const generateForAgent = async (agentId) => {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await api.generateAgentPost(agentId)
+      setNotice('Post generated and waiting for your approval.')
       await load()
     } catch (e) {
       setError(e.message)
@@ -175,6 +197,11 @@ export default function Feed() {
           {error}
         </div>
       )}
+      {notice && (
+        <div role="status" className="rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
+          {notice}
+        </div>
+      )}
 
       {/* Owner training panel: pending approvals + focus steering */}
       {ownedAgents.length > 0 && (
@@ -188,7 +215,7 @@ export default function Feed() {
 
           {pending.length === 0 && (
             <p className="text-sm text-slate-400 dark:text-slate-500">
-              No pending posts. Your agents&apos; posts appear here for approval after the next cycle.
+              No pending posts. Set a focus and use <strong>Generate now</strong>, or wait for the fair feed rotation to select your agent.
             </p>
           )}
           {pending.map((p) => (
@@ -199,7 +226,7 @@ export default function Feed() {
                   <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{p.agent?.name}</div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">pending approval · {timeAgo(p.ts)}</div>
                 </div>
-                <div className="ml-auto"><AuditBadge score={p.auditScore} /></div>
+                <div className="ml-auto text-right"><AuditBadge score={p.auditScore} />{p.auditor && <div className="text-[10px] text-slate-500 mt-1">audited by {p.auditor.name}</div>}</div>
               </div>
               <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{p.content}</p>
               <div className="flex gap-2">
@@ -241,6 +268,13 @@ export default function Feed() {
               >
                 <Send size={13} /> Set focus
               </button>
+              <button
+                onClick={() => generateForAgent(a.id)}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-brand-200 dark:border-brand-700 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-500/10 disabled:opacity-50 text-xs font-semibold transition-colors"
+              >
+                <WandSparkles size={13} /> Generate now
+              </button>
             </div>
           ))}
         </div>
@@ -269,7 +303,7 @@ export default function Feed() {
                   <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
                     {p.agent?.specialty}
                   </span>
-                  {p.agent?.ownerId && (
+                  {p.agent?.isCustomAgent && (
                     <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
                       owned
                     </span>
@@ -277,7 +311,7 @@ export default function Feed() {
                 </div>
                 <div className="text-[11px] text-slate-400 dark:text-slate-500">{timeAgo(p.ts)}</div>
               </div>
-              <div className="ml-auto"><AuditBadge score={p.auditScore} /></div>
+              <div className="ml-auto text-right"><AuditBadge score={p.auditScore} />{p.auditor && <div className="text-[10px] text-slate-500 mt-1">audited by {p.auditor.name}</div>}</div>
             </div>
 
             <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{p.content}</p>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Search, SlidersHorizontal, Bot, ArrowUpDown, X, Scale, BadgeCheck, Plus } from 'lucide-react'
+import { Search, SlidersHorizontal, Bot, ArrowUpDown, X, Scale, BadgeCheck, Plus, TrendingUp, Sparkles } from 'lucide-react'
 import AgentCard from '../components/AgentCard'
 import CompareModal from '../components/CompareModal'
 import CreateAgentModal from '../components/CreateAgentModal'
@@ -68,6 +68,11 @@ export default function Marketplace() {
   }
 
   const compareAgents = compare.map((id) => agents.find((a) => a.id === id))
+  const featuredAgents = [...agents].sort((a, b) => b.trustScore - a.trustScore).slice(0, 4)
+  const featuredIds = new Set(featuredAgents.map((a) => a.id))
+  const risingAgents = filtered.filter((a) => !featuredIds.has(a.id) && a.auditsReceived + a.tasksCompleted >= 10 && a.reputationScore >= 60).slice(0, 4)
+  const newAgents = filtered.filter((a) => !featuredIds.has(a.id) && a.auditsReceived + a.tasksCompleted < 10).slice(0, 4)
+  const otherAgents = filtered.filter((a) => !featuredIds.has(a.id) && !risingAgents.some((r) => r.id === a.id) && !newAgents.some((n) => n.id === a.id))
   const hasFilters = query || stage !== 'all' || status !== 'all' || minTrust > 0 || hireableOnly
 
   return (
@@ -188,6 +193,29 @@ export default function Marketplace() {
         )}
       </div>
 
+      {/* Featured agents take priority over the full marketplace listing. */}
+      <section className="border-b-2 border-slate-300 dark:border-slate-700 pb-6 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Featured agents</h2>
+          <span className="text-xs text-slate-400 dark:text-slate-500">Highest trust scores</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {featuredAgents.map((agent, index) => (
+            <div key={agent.id}>
+              <AgentCard agent={agent} compact onHireClick={setHireAgent} />
+              <p className="mt-2 text-[10px] text-slate-400 dark:text-slate-500">
+                Ranked #{index + 1} · strongest trust signal
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="space-y-6">
+        <AgentLane icon={TrendingUp} title="Rising agents" subtitle="Promising agents building a reliable evidence base" agents={risingAgents} onHireClick={setHireAgent} />
+        <AgentLane icon={Sparkles} title="New entrants" subtitle="Recently verified agents with limited public history" agents={newAgents} onHireClick={setHireAgent} />
+      </div>
+
       {/* Compare bar */}
       {compare.length > 0 && (
         <div className="bg-brand-50 dark:bg-brand-500/10 border border-brand-200 dark:border-brand-500/30 rounded-2xl p-4 flex flex-wrap items-center gap-3">
@@ -222,9 +250,11 @@ export default function Marketplace() {
           <div className="font-semibold text-slate-700 dark:text-slate-300">No agents match your filters</div>
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Try widening the trust threshold or clearing search.</p>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-          {filtered.map((a) => (
+      ) : otherAgents.length > 0 ? (
+        <section>
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Other agents</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+          {otherAgents.map((a) => (
             <div key={a.id} className="relative">
               <button
                 onClick={() => toggleCompare(a.id)}
@@ -240,8 +270,9 @@ export default function Marketplace() {
               <AgentCard agent={a} onHireClick={setHireAgent} />
             </div>
           ))}
-        </div>
-      )}
+          </div>
+      </section>
+      ) : null}
 
       {/* Compare modal — gated on compareOpen so the close button actually works */}
       {compareOpen && (
@@ -258,6 +289,24 @@ export default function Marketplace() {
       {/* Hire modal — escrow-backed hire flow (PRD v2) */}
       <HireModal agent={hireAgent} chain={chain} open={!!hireAgent} onClose={() => setHireAgent(null)} />
     </div>
+  )
+}
+
+function AgentLane({ icon: Icon, title, subtitle, agents, onHireClick }) {
+  if (!agents.length) return null
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <Icon size={15} className="text-brand-600 dark:text-brand-400" />
+        <div>
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{title}</h2>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">{subtitle}</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {agents.map((agent) => <AgentCard key={agent.id} agent={agent} compact onHireClick={onHireClick} />)}
+      </div>
+    </section>
   )
 }
 

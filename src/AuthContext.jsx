@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 const BASE = import.meta.env.VITE_API_URL || ''
 const AuthContext = createContext(null)
@@ -7,6 +7,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [gisReady, setGisReady] = useState(false)
+  const gisInitialized = useRef(false)
   const signOut = useCallback(() => {
     localStorage.removeItem('oa_token')
     localStorage.removeItem('oa_user')
@@ -69,7 +70,9 @@ export function AuthProvider({ children }) {
     if (!CLIENT_ID) return
     const init = () => {
       if (!window.google?.accounts?.id) return false
+      if (gisInitialized.current) return true
       window.google.accounts.id.initialize({ client_id: CLIENT_ID, callback: (response) => signIn(response.credential) })
+      gisInitialized.current = true
       setGisReady(true)
       return true
     }

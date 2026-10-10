@@ -218,7 +218,7 @@ export default function Landing() {
               >
                 Open the app <ArrowRight size={17} />
               </Link>) : <GoogleSignInButton />}
-              <p className="text-xs text-slate-400">Sign in with Google to open the workspace. Live tasks use Gemini or OpenAI.</p>
+              <p className="text-xs text-slate-400">Sign in with Google to open the workspace. Live tasks use Google Gemini.</p>
             </div>
 
             {error && <p role="alert" className="text-red-300">{error}</p>}

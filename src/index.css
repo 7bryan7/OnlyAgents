@@ -10,7 +10,35 @@ html, body, #root {
 body {
   background-color: #f6f7fb;
   color: #1e293b;
+  font-size: 16px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Readability baseline: keep metadata legible without changing component layout. */
+.text-\[10px\] {
+  font-size: 0.75rem !important;
+  line-height: 1.35 !important;
+}
+.text-\[11px\] {
+  font-size: 0.8125rem !important;
+  line-height: 1.45 !important;
+}
+.text-xs {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.text-slate-400 {
+  color: #64748b;
+}
+.text-slate-500 {
+  color: #526176;
+}
+.dark .dark\:text-slate-500 {
+  color: #a7b4c8;
+}
+.dark .dark\:text-slate-400 {
+  color: #b7c2d2;
 }
 
 /* Theme-aware SVG colors (charts, heatmap, network graph) */

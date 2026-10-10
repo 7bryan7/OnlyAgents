@@ -34,7 +34,7 @@ export async function resolveIdentity(req) {
 export function protectMutation(req, res, next) {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
     const origin = req.headers.origin
-    if (origin && origin !== (process.env.APP_ORIGIN || 'http://localhost:5173')) return res.status(403).json({ error: 'Request origin is not allowed.' })
+    if (origin && origin !== (process.env.APP_ORIGIN || 'http://localhost:3000')) return res.status(403).json({ error: 'Request origin is not allowed.' })
     if (sessionToken(req) && req.headers['x-requested-with'] !== 'OnlyAgent') return res.status(403).json({ error: 'Missing request verification header.' })
   }
   next()

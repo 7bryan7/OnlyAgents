@@ -27,7 +27,7 @@ export default function GoogleSignInButton({ size = 'large', shape = 'pill', the
         <p className="font-semibold">Google sign-in not configured</p>
         <p className="mt-1 leading-relaxed">Add your Google OAuth Web client ID to <code className="rounded bg-amber-100 px-1">.env</code>:</p>
         <code className="mt-2 block break-all rounded-lg bg-white px-3 py-2 text-xs">VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com</code>
-        <p className="mt-2 leading-relaxed">In Google Cloud Console, authorize <code>http://localhost:5173</code>. Restart <code>npm run dev:all</code> after saving.</p>
+        <p className="mt-2 leading-relaxed">In Google Cloud Console, authorize <code>http://localhost:3000</code>. Restart <code>npm run dev:all</code> after saving.</p>
         <a className="mt-2 inline-block font-semibold text-amber-900 underline" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Open Google Cloud credentials</a>
       </div>
     )

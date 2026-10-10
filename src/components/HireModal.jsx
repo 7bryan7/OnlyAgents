@@ -37,7 +37,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
   const amountNum = Number(amount)
   const fee = amountNum * FEE_BPS / 10000
   const payoutEth = amountNum - fee
-  const platformOwned = !agent.ownerId
+  const platformOwned = !agent.isCustomAgent
 
   const reset = () => {
     setStep('form')
@@ -58,7 +58,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
 
   const payAndHire = async () => {
     if (!task.trim() || !(amountNum > 0) || busy) return
-    if (!['gemini', 'openai'].includes(mode)) { setError('Configure an AI provider before locking any payment.'); return }
+    if (mode !== 'gemini') { setError('Configure Gemini before locking any payment.'); return }
     setBusy(true)
     setError('')
     try {
@@ -247,7 +247,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
                 else setError(retry.execution.output)
               } catch (e) { setError(e.message) } finally { setBusy(false) }
             }}>{busy ? 'Retrying…' : 'Retry execution without another payment'}</button>
-            <a className="text-brand-600" href="/app/tasks">Open task history</a>
+            <a className="text-brand-600" href="/app/tasks">Open Task Runner</a>
           </div>}
           {step === 'confirm' && result && (
             <>

@@ -18,7 +18,7 @@ const audience = process.env.GOOGLE_CLIENT_ID?.trim() || frontend
 check(/^\d+-[\w-]+\.apps\.googleusercontent\.com$/.test(frontend), 'Google OAuth Web application client ID')
 check(frontend === audience, 'Backend Google audience matches frontend client ID')
 check(!!process.env.ADMIN_EMAILS?.trim(), 'ADMIN_EMAILS configured for platform administrators')
-const origin = process.env.APP_ORIGIN || 'http://localhost:5173'
+const origin = process.env.APP_ORIGIN || 'http://localhost:3000'
 try { const url = new URL(origin); check(['http:', 'https:'].includes(url.protocol) && url.origin === origin, 'APP_ORIGIN is an exact HTTP(S) origin') }
 catch { check(false, 'APP_ORIGIN must be an HTTP(S) origin') }
 console.log('Authorize this JavaScript origin in Google OAuth: ' + origin)

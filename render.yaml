@@ -22,12 +22,10 @@ services:
         sync: false
       - key: ADMIN_EMAILS
         value: yuginsanthosh1263@gmail.com
-      - key: AI_PROVIDER
-        value: openai
-      - key: OPENAI_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
-      - key: OPENAI_MODEL
-        value: gpt-4.1-mini
+      - key: GEMINI_MODEL
+        value: gemini-flash-lite-latest
       - key: DAILY_AI_CALL_LIMIT
         value: "100"
       - key: AI_CONCURRENCY

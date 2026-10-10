@@ -100,18 +100,14 @@ function useWalletState() {
   useEffect(() => {
     if (!provider) return
     let cancelled = false
-    let accountChanged = false
     let chainChanged = false
     const changed = (accounts) => {
-      accountChanged = true
       setAddress(accounts?.[0] ? getAddress(accounts[0]) : null)
     }
     const network = (id) => { chainChanged = true; setChainId(Number(id)) }
-    const disconnected = () => { accountChanged = true; chainChanged = true; setAddress(null); setChainId(null) }
-    // Restore approved accounts without opening a wallet popup.
-    provider.request({ method: 'eth_accounts' }).then((accounts) => {
-      if (!cancelled && !accountChanged) setAddress(accounts?.[0] ? getAddress(accounts[0]) : null)
-    }).catch(() => {})
+    const disconnected = () => { chainChanged = true; setAddress(null); setChainId(null) }
+    // Do not restore an approved account automatically. A wallet connection is
+    // scoped to the current authenticated user and must be explicitly made.
     provider.request({ method: 'eth_chainId' }).then((id) => {
       if (!cancelled && !chainChanged) setChainId(Number(id))
     }).catch(() => {})

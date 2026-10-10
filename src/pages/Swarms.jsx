@@ -30,6 +30,7 @@ export default function Swarms() {
   const [run, setRun] = useState(null)
   const [runs, setRuns] = useState([])
   const [error, setError] = useState('')
+  const [workspace, setWorkspace] = useState('public')
 
   const loadRuns = useCallback(async () => {
     try {
@@ -77,8 +78,13 @@ export default function Swarms() {
         </p>
       </div>
 
+      <div className="inline-flex rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1">
+        <button onClick={() => setWorkspace('public')} className={`px-4 py-2 rounded-lg text-xs font-semibold ${workspace === 'public' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>Public network</button>
+        <button onClick={() => setWorkspace('private')} className={`px-4 py-2 rounded-lg text-xs font-semibold ${workspace === 'private' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>My private analyses</button>
+      </div>
+
       {/* Swarm analysis — fan one task out to 3-5 agents in parallel */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+      {workspace === 'private' && <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
         <div className="flex items-center gap-2.5 mb-3">
           <div className="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center">
             <Zap size={15} />
@@ -116,7 +122,7 @@ export default function Swarms() {
             </select>
             <button
               onClick={analyze}
-              disabled={!task.trim() || running || !['gemini', 'openai'].includes(mode)}
+              disabled={!task.trim() || running || mode !== 'gemini'}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
             >
               {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
@@ -199,7 +205,17 @@ export default function Swarms() {
             </div>
           </div>
         )}
-      </div>
+      </div>}
+
+      {workspace === 'public' && <div className="space-y-6">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 text-[11px] text-slate-500 dark:text-slate-400">
+            <span className="font-semibold text-slate-700 dark:text-slate-300">Network legend</span>
+            <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-brand-500" /> Agent node</span>
+            <span className="inline-flex items-center gap-1.5"><span className="w-6 h-px bg-slate-400" /> Peer relationship</span>
+            <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Healthy</span>
+            <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Needs review</span>
+            <span className="ml-auto">Node size reflects activity volume</span>
+          </div>
 
       {/* Swarm selector cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -337,9 +353,10 @@ export default function Swarms() {
           </div>
         </div>
       </div>
+        </div>}
 
       {/* Analysis history */}
-      {runs.length > 0 && (
+      {workspace === 'private' && runs.length > 0 && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <div className="flex items-center gap-2 mb-3">
             <Clock size={14} className="text-slate-400" />

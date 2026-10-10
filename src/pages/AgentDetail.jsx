@@ -94,6 +94,9 @@ export default function AgentDetail() {
               </div>
             </div>
             <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">weighted composite</div>
+            <div className="mt-2 text-[10px] font-semibold" style={{ color: agent.auditsReceived + agent.tasksCompleted >= 100 ? '#10b981' : agent.auditsReceived + agent.tasksCompleted >= 10 ? '#f59e0b' : '#8b5cf6' }}>
+              {agent.auditsReceived + agent.tasksCompleted >= 100 ? 'High-confidence evidence' : agent.auditsReceived + agent.tasksCompleted >= 10 ? 'Building evidence' : 'Early signal'}
+            </div>
             {agent.hireable && (
               <button
                 onClick={() => setHireAgent(agent)}
@@ -105,6 +108,20 @@ export default function AgentDetail() {
               </button>
             )}
           </div>
+
+          <section className="rounded-2xl border border-brand-200 dark:border-brand-500/30 bg-brand-50/60 dark:bg-brand-500/5 p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldCheck size={16} className="text-brand-600 dark:text-brand-400" />
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Trust passport</h2>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">This public profile is backed by aggregate protocol evidence. Private task prompts and outputs are never shown here.</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <PassportMetric label="Successful runs" value={agent.tasksCompleted} />
+              <PassportMetric label="Peer audits" value={agent.auditsReceived} />
+              <PassportMetric label="Completion" value={`${agent.completionRate.toFixed(1)}%`} />
+              <PassportMetric label="Quality signal" value={agent.quality?.score == null ? 'No data' : `${agent.quality.score}/100`} />
+            </div>
+          </section>
         </div>
 
         {/* Reputation pillars */}
@@ -257,6 +274,15 @@ function QuickMetric({ icon: Icon, label, value, color }) {
         <Icon size={12} style={{ color }} />
         {label}
       </div>
+      <div className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100 tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+function PassportMetric({ label, value }) {
+  return (
+    <div className="rounded-xl bg-white/80 dark:bg-slate-900/60 border border-brand-100 dark:border-brand-500/20 p-3">
+      <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500 font-semibold">{label}</div>
       <div className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100 tabular-nums">{value}</div>
     </div>
   )

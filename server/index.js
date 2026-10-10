@@ -51,12 +51,14 @@ import {
   feedStatus,
   generatePost,
   auditContent,
+  selectFeedAuditor,
+  recordFeedAudit,
 } from './feed.js'
 
 const app = express()
 const stopBackups = startBackupScheduler(db, process.env.DATA_DIR || fileURLToPath(new URL('../data', import.meta.url)))
 app.disable('x-powered-by')
-app.use(cors({ origin: process.env.APP_ORIGIN || 'http://localhost:5173', credentials: true }))
+app.use(cors({ origin: process.env.APP_ORIGIN || 'http://localhost:3000', credentials: true }))
 app.use(express.json({ limit: '32kb' }))
 app.use('/api', (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next() })
 app.use('/api', protectMutation)
@@ -74,7 +76,7 @@ const server = createServer(app)
 const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 })
 server.on('upgrade', async (req, socket, head) => {
   socket.on('error', () => {})
-  if (req.url !== '/ws' || (req.headers.origin && req.headers.origin !== (process.env.APP_ORIGIN || 'http://localhost:5173'))) { socket.destroy(); return }
+  if (req.url !== '/ws' || (req.headers.origin && req.headers.origin !== (process.env.APP_ORIGIN || 'http://localhost:3000'))) { socket.destroy(); return }
   try {
     await resolveIdentity(req)
     wss.handleUpgrade(req, socket, head, (client) => wss.emit('connection', client, req))
@@ -102,9 +104,20 @@ const clamp01 = (v) => clamp(v, 0, 1)
 function routeTask(stageId) {
   const pool = getAllAgents().filter((a) => (stageId ? a.stage.id === stageId : true) && buildAgent(a).status !== 'stalled')
   if (pool.length === 0) return null
-  const ranked = pool
-    .map((a) => ({ agent: a, trust: buildAgent(a).trustScore }))
-    .sort((x, y) => y.trust - x.trust)
+  const ranked = pool.map((agent) => {
+    const built = buildAgent(agent)
+    const evidence = built.executionsCount + built.auditsReceived
+    const explorationBonus = evidence < 5 ? (5 - evidence) * 8 : 0
+    const recentFailures = store.executions.filter((e) => e.agentId === agent.id && e.ts > Date.now() - 7 * 86400000 && !e.success).length
+    const specialization = stageId && agent.stage.id === stageId ? 12 : 0
+    return { agent, score: built.reputationScore + explorationBonus + specialization - recentFailures * 10 }
+  }).sort((a, b) => b.score - a.score)
+  store.config.routingCount = (store.config.routingCount || 0) + 1
+  const exploreEvery = Math.max(2, Math.round(1 / (store.config.explorationRate || 0.25)))
+  if (store.config.routingCount % exploreEvery === 0) {
+    const candidates = ranked.slice(0, Math.max(1, Math.ceil(ranked.length * (store.config.explorationRate || 0.25))))
+    return candidates[Math.floor(Math.random() * candidates.length)].agent
+  }
   return ranked[0].agent
 }
 
@@ -238,7 +251,7 @@ app.post('/api/swarms/analyze', async (req, res) => {
 })
 
 app.get('/api/swarms/runs', (req, res) => {
-  res.json({ runs: recentSwarmRuns() })
+  res.json({ runs: recentSwarmRuns(20, req.user.email) })
 })
 
 // ---------------------------------------------------------------------------
@@ -309,6 +322,10 @@ app.post('/api/agents/custom', requireOwnedWallet, async (req, res) => {
     return res.status(400).json({ error: 'walletAddress must be a valid address' })
   }
   if (!txHash) return res.status(400).json({ error: 'txHash is required' })
+  const fleetLimit = Math.max(1, Number(store.config.fleetLimit) || 5)
+  if (store.agents.filter((a) => a.ownerId === email).length >= fleetLimit) {
+    return res.status(403).json({ error: `Provider fleet limit reached (${fleetLimit} agents). Build provider reputation to request a higher limit.` })
+  }
 
   // --- verify the mint on-chain (PRD §7: verify before any off-chain effect) ---
   const metadataHash = metadataHashOf({ name: name.trim(), personaPrompt: personaPrompt.trim(), specialty })
@@ -362,10 +379,10 @@ app.get('/api/events', (req, res) => {
   const events = [
     ...store.audits
       .filter((a) => getAgent(a.agentId) && getAgent(a.auditorId))
-      .map((a) => ({ type: 'audit', ...a, tsLabel: timeAgo(a.ts) })),
+      .map((a) => ({ type: 'audit', id: a.id, agentId: a.agentId, auditorId: a.auditorId, verdict: a.verdict, ts: a.ts, tsLabel: timeAgo(a.ts) })),
     ...store.executions
       .filter((e) => getAgent(e.agentId))
-      .map((e) => ({ type: 'execution', ...e, tsLabel: timeAgo(e.ts) })),
+      .map((e) => ({ type: 'execution', id: e.id, agentId: e.agentId, success: e.success, latencyMs: e.latencyMs, ts: e.ts, tsLabel: timeAgo(e.ts) })),
   ]
     .sort((a, b) => b.ts - a.ts)
     .slice(0, 30)
@@ -383,6 +400,7 @@ function buildFeedPost(p) {
   return {
     ...p,
     agent: agent ? buildAgent(agent) : null,
+    auditor: p.auditorId && getAgent(p.auditorId) ? buildAgent(getAgent(p.auditorId)) : null,
     reactions,
     tsLabel: timeAgo(p.ts),
   }
@@ -400,8 +418,7 @@ app.get('/api/feed', (req, res) => {
 
 // Pending posts for the signed-in user's agents (approval gate)
 app.get('/api/feed/pending', (req, res) => {
-  const { email } = req.query
-  const owned = store.agents.filter((a) => a.ownerId === email).map((a) => a.id)
+  const owned = store.agents.filter((a) => a.ownerId === req.user.email).map((a) => a.id)
   const pending = store.feedPosts
     .filter((p) => p.status === 'pending' && owned.includes(p.agentId))
     .sort((a, b) => b.ts - a.ts)
@@ -430,11 +447,14 @@ app.post('/api/feed/posts/:id/regenerate', async (req, res) => {
   const agent = getAgent(post.agentId)
   if (!agent) return res.status(404).json({ error: 'Agent not found' })
   const content = await generatePost(agent, store.config.feedFocus?.[agent.id] || null)
-  const audit = await auditContent(agent, content)
+  const auditor = selectFeedAuditor(agent.id)
+  const audit = await auditContent(auditor, content)
+  recordFeedAudit(auditor.id)
   post.content = content
   Object.assign(post, runtimeProvenance())
   post.auditScore = audit.score
   post.audit = audit.axes
+  post.auditorId = auditor.id
   saveStore()
   broadcast({ type: 'update', resource: 'feed' })
   res.json({ post: buildFeedPost(post) })
@@ -446,6 +466,9 @@ app.post('/api/feed/cycle', async (req, res) => {
   if (!Number.isInteger(count) || count < 1 || count > 6) return res.status(400).json({ error: 'count must be an integer from 1 to 6' })
   const results = await runFeedCycle({ count })
   broadcast({ type: 'update', resource: 'feed' })
+  if (results.length > 0 && results.every((result) => result.kind === 'error')) {
+    return res.status(502).json({ error: 'All selected agents failed to generate feed activity.', results, status: feedStatus() })
+  }
   res.json({ results, status: feedStatus() })
 })
 
@@ -461,6 +484,42 @@ app.post('/api/feed/focus', (req, res) => {
   saveStore()
   broadcast({ type: 'update', resource: 'feed' })
   res.json({ agentId, focus: store.config.feedFocus[agentId] })
+})
+
+app.post('/api/feed/agents/:id/generate', async (req, res) => {
+  const agent = getAgent(req.params.id)
+  if (!agent) return res.status(404).json({ error: 'Agent not found' })
+  if (agent.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the agent owner can generate this post' })
+  if (store.feedPosts.some((post) => post.agentId === agent.id && post.status === 'pending')) {
+    return res.status(409).json({ error: 'This agent already has a pending post. Approve or regenerate it first.' })
+  }
+  try {
+    requireRuntime()
+    const content = await generatePost(agent, store.config.feedFocus?.[agent.id] || null)
+    const auditor = selectFeedAuditor(agent.id)
+    const audit = await auditContent(auditor, content)
+    recordFeedAudit(auditor.id)
+    const post = {
+      id: nextId('fp'),
+      ...runtimeProvenance(),
+      agentId: agent.id,
+      content,
+      status: 'pending',
+      auditScore: audit.score,
+      audit: audit.axes,
+      auditorId: auditor.id,
+      ts: Date.now(),
+    }
+    store.feedPosts.push(post)
+    store.config.feedRotation = store.config.feedRotation || {}
+    const rotation = store.config.feedRotation[agent.id] || { selected: 0, lastSelectedAt: 0 }
+    store.config.feedRotation[agent.id] = { ...rotation, lastSelectedAt: Date.now() }
+    saveStore()
+    broadcast({ type: 'update', resource: 'feed' })
+    res.status(201).json({ post: buildFeedPost(post) })
+  } catch (error) {
+    res.status(error.status || 502).json({ error: error.message })
+  }
 })
 
 app.get('/api/feed/status', (req, res) => {
@@ -502,6 +561,8 @@ app.post('/api/tasks', async (req, res) => {
   execution.source = result.source
   execution.model = result.model
   taskRecord.status = result.success ? 'completed' : 'failed'
+  if (result.success) taskRecord.reviewDeadlineAt = Date.now() + REVIEW_WINDOW_HOURS * 3600000
+  taskRecord.revisionCount = 0
   taskRecord.executionId = execution.id
   taskRecord.source = result.source
   taskRecord.model = result.model
@@ -529,6 +590,10 @@ app.post('/api/tasks/:id/retry', async (req, res) => {
   const execution = { id: nextId('ex'), agentId: agent.id, task: task.task, output: result.output, success: result.success, latencyMs: result.latencyMs, source: result.source, model: result.model, ts: Date.now() }
   store.executions.push(execution)
   Object.assign(task, { status: result.success ? 'completed' : 'failed', executionId: execution.id, source: result.source, model: result.model })
+  if (result.success) {
+    task.reviewDeadlineAt = Date.now() + REVIEW_WINDOW_HOURS * 3600000
+    task.revisionRequest = null
+  }
   saveStore()
   broadcast({ type: 'update', resource: 'all' })
   res.json({ task, execution: { ...execution, agent: buildAgent(agent) }, routedTo: buildAgent(agent), mode: MODE })
@@ -553,6 +618,7 @@ app.post('/api/tasks/:id/audit', async (req, res) => {
 
   if (!auditor) return res.status(404).json({ error: 'Auditor not found' })
   if (auditor.id === agent.id) return res.status(400).json({ error: 'An agent cannot audit itself' })
+  if (auditor.ownerId && auditor.ownerId === agent.ownerId) return res.status(400).json({ error: 'An owner cannot audit their own fleet' })
   if (task.auditId) return res.status(409).json({ error: 'Task already audited' })
   if (auditingTasks.has(task.id)) return res.status(409).json({ error: 'Audit already running' })
   auditingTasks.add(task.id)
@@ -573,10 +639,109 @@ app.post('/api/tasks/:id/audit', async (req, res) => {
   audit.source = result.source
   audit.model = result.model
   task.auditId = audit.id
+  store.config.auditorCredits = store.config.auditorCredits || {}
+  store.config.auditorCredits[auditor.id] = (store.config.auditorCredits[auditor.id] || 0) + (result.verdict === 'pass' || result.verdict === 'fail' ? 2 : 1)
   saveStore()
 
   broadcast({ type: 'update', resource: 'all' })
   res.json({ audit: buildAuditEvent(audit), updatedAgent: buildAgent(agent), mode: MODE })
+})
+
+app.post('/api/tasks/:id/outcome', (req, res) => {
+  const task = store.tasks.find((item) => item.id === req.params.id)
+  if (!task) return res.status(404).json({ error: 'Task not found' })
+  if (task.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the task owner can submit an outcome' })
+  if (task.escrowTaskId) return res.status(409).json({ error: 'Approve an escrow task by releasing its payment.' })
+  if (expireReview(task)) return res.status(409).json({ error: 'The review window has expired.' })
+  const outcome = String(req.body?.outcome || '')
+  if (!['accepted'].includes(outcome)) {
+    return res.status(400).json({ error: 'Use the revision or dispute action for work you do not accept.' })
+  }
+  const quality = { accepted: 100, revision_requested: 55, rejected: 0 }[outcome]
+  const record = { id: nextId('out'), taskId: task.id, agentId: task.agentId, ownerId: task.ownerId, outcome, quality, note: String(req.body?.note || '').slice(0, 500), ts: Date.now() }
+  store.config.customerOutcomes = (store.config.customerOutcomes || []).filter((item) => item.taskId !== task.id)
+  store.config.customerOutcomes.push(record)
+  task.status = 'approved'
+  saveStore()
+  broadcast({ type: 'update', resource: 'all' })
+  res.status(201).json({ outcome: record })
+})
+
+app.post('/api/tasks/:id/revision', async (req, res) => {
+  const task = store.tasks.find((item) => item.id === req.params.id)
+  if (!task) return res.status(404).json({ error: 'Task not found' })
+  if (task.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the task owner can request a revision' })
+  if (expireReview(task)) return res.status(409).json({ error: 'The review window has expired.' })
+  if (task.status !== 'completed') return res.status(409).json({ error: `Task cannot be revised from status ${task.status}` })
+  if ((task.revisionCount || 0) >= MAX_REVISIONS) return res.status(409).json({ error: `Maximum revisions reached (${MAX_REVISIONS}). Open a dispute for independent review.` })
+  const request = String(req.body?.request || '').trim()
+  if (request.length < 10 || request.length > 1000) return res.status(400).json({ error: 'revision request must be 10-1000 characters' })
+  const agent = getAgent(task.agentId)
+  if (!agent) return res.status(404).json({ error: 'Task agent no longer exists' })
+  requireRuntime()
+  task.status = 'revision_requested'
+  task.revisionRequest = request
+  task.revisionCount = (task.revisionCount || 0) + 1
+  saveStore()
+  const result = await runAgent(agent, `${task.task}\n\nCustomer revision request:\n${request}`)
+  const execution = { id: nextId('ex'), agentId: agent.id, task: task.task, output: result.output, success: result.success, latencyMs: result.latencyMs, source: result.source, model: result.model, ts: Date.now(), revision: task.revisionCount }
+  store.executions.push(execution)
+  Object.assign(task, { status: result.success ? 'completed' : 'failed', executionId: execution.id, source: result.source, model: result.model })
+  if (result.success) task.reviewDeadlineAt = Date.now() + REVIEW_WINDOW_HOURS * 3600000
+  saveStore()
+  broadcast({ type: 'update', resource: 'tasks' })
+  res.status(201).json({ task, execution: { ...execution, agent: buildAgent(agent) }, reviewWindowHours: REVIEW_WINDOW_HOURS })
+})
+
+app.post('/api/tasks/:id/dispute', async (req, res) => {
+  const task = store.tasks.find((item) => item.id === req.params.id)
+  if (!task) return res.status(404).json({ error: 'Task not found' })
+  if (task.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the task owner can open a dispute' })
+  if (expireReview(task)) return res.status(409).json({ error: 'The review window has expired.' })
+  if (task.status !== 'completed') return res.status(409).json({ error: `Task cannot be disputed from status ${task.status}` })
+  const reason = String(req.body?.reason || '').trim()
+  if (reason.length < 10 || reason.length > 1000) return res.status(400).json({ error: 'dispute reason must be 10-1000 characters' })
+  const agent = getAgent(task.agentId)
+  const conflictFree = (candidate) => candidate.id !== task.agentId && !(agent?.ownerId && candidate.ownerId === agent.ownerId)
+  const reviewer = getAllAgents().find((candidate) => conflictFree(candidate) && candidate.stage.id === agent?.stage.id) ||
+    getAllAgents().find(conflictFree)
+  if (!reviewer) return res.status(503).json({ error: 'No independent reviewer is available' })
+  const dispute = { id: nextId('dis'), taskId: task.id, agentId: task.agentId, ownerId: task.ownerId, reason, reviewerId: reviewer.id, status: 'under_review', createdAt: Date.now(), resolvedAt: null }
+  store.config.disputes = store.config.disputes || []
+  store.config.disputes.push(dispute)
+  task.status = 'disputed'
+  saveStore()
+  const execution = store.executions.find((item) => item.id === task.executionId)
+  try {
+    const review = await auditOutput(reviewer, agent, task.task, execution?.output || '')
+    dispute.review = { verdict: review.verdict, note: review.note, source: review.source, model: review.model, reviewerId: reviewer.id, ts: Date.now() }
+    store.config.auditorCredits = store.config.auditorCredits || {}
+    store.config.auditorCredits[reviewer.id] = (store.config.auditorCredits[reviewer.id] || 0) + 2
+  } catch (error) {
+    dispute.status = 'review_failed'
+    dispute.reviewError = error.message
+  }
+  saveStore()
+  broadcast({ type: 'update', resource: 'all' })
+  res.status(201).json({ dispute })
+})
+
+app.post('/api/disputes/:id/resolve', requireAdmin, (req, res) => {
+  const dispute = (store.config.disputes || []).find((item) => item.id === req.params.id)
+  if (!dispute) return res.status(404).json({ error: 'Dispute not found' })
+  if (!['open', 'under_review'].includes(dispute.status)) return res.status(409).json({ error: 'Dispute already resolved' })
+  if (!dispute.review) return res.status(409).json({ error: 'Independent review is not available yet' })
+  const decision = String(req.body?.decision || '')
+  if (!['uphold', 'reject'].includes(decision)) return res.status(400).json({ error: 'decision must be uphold or reject' })
+  dispute.status = decision === 'uphold' ? 'upheld' : 'rejected'
+  dispute.decision = decision
+  dispute.resolutionNote = String(req.body?.note || '').slice(0, 1000)
+  dispute.resolvedAt = Date.now()
+  const task = store.tasks.find((item) => item.id === dispute.taskId)
+  if (task) task.status = decision === 'uphold' ? 'dispute_upheld' : 'completed'
+  saveStore()
+  broadcast({ type: 'update', resource: 'all' })
+  res.json({ dispute })
 })
 
 // ---------------------------------------------------------------------------
@@ -586,6 +751,21 @@ app.post('/api/tasks/:id/audit', async (req, res) => {
 // Every step is verified on-chain before any off-chain effect.
 // ---------------------------------------------------------------------------
 const FEE_BPS = 700
+const REVIEW_WINDOW_HOURS = Math.max(1, Number(process.env.REVIEW_WINDOW_HOURS) || 48)
+const MAX_REVISIONS = 3
+
+function reviewDeadline(task) {
+  return task.reviewDeadlineAt && Date.now() > task.reviewDeadlineAt
+}
+
+function expireReview(task) {
+  if (task.status === 'completed' && reviewDeadline(task)) {
+    task.status = 'review_expired'
+    saveStore()
+    return true
+  }
+  return false
+}
 
 function agentOwnerOf(agent) {
   // Custom agents pay their minting wallet; platform-owned flagships pay the
@@ -690,6 +870,7 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
   if (task.status === 'paid' || task.status === 'released') {
     return res.status(400).json({ error: `Task already settled (${task.status})` })
   }
+  if (expireReview(task)) return res.status(409).json({ error: 'The review window has expired. Open a dispute to request independent review.' })
   if (task.status !== 'completed') {
     return res.status(400).json({ error: `Task must be completed before confirming (status: ${task.status})` })
   }
@@ -721,6 +902,7 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
 // Task ledger with escrow state (hiring history)
 app.get('/api/tasks', (req, res) => {
   const list = store.tasks.filter((t) => t.ownerId === req.user.email)
+    .map((t) => { expireReview(t); return t })
     .sort((a, b) => b.ts - a.ts)
     .slice(0, 100)
     .map((t) => ({ ...t, agent: getAgent(t.agentId) ? buildAgent(getAgent(t.agentId)) : null }))
@@ -730,6 +912,7 @@ app.get('/api/tasks', (req, res) => {
 app.get('/api/tasks/:id', (req, res) => {
   const task = store.tasks.find((t) => t.id === req.params.id && t.ownerId === req.user.email)
   if (!task) return res.status(404).json({ error: 'Task not found' })
+  expireReview(task)
   const agent = getAgent(task.agentId)
   res.json({ task, execution: store.executions.find((e) => e.id === task.executionId) || null, agent: agent ? buildAgent(agent) : null })
 })
