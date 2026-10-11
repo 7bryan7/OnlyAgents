@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw, Send, Sparkles, Check, RotateCcw, MessageSquare, Activity, WandSparkles } from 'lucide-react'
 import { api } from '../api'
 import { useData } from '../DataContext'
-import { onWSMessage, isWSConnected } from '../ws'
+import { onWSMessage, isLiveUpdatesActive } from '../ws'
 
 const REACTION_LABELS = {
   like: 'like',
@@ -80,12 +80,12 @@ export default function Feed() {
   useEffect(() => {
     load()
     // Live: reload on backend push events (new posts, approvals, cycles).
-    // Fallback: 30s poll only while the WebSocket is unavailable.
+    // Fallback only when neither WebSocket nor shared polling is active.
     const unsubscribe = onWSMessage((msg) => {
       if (msg.type === 'update' && (msg.resource === 'feed' || msg.resource === 'all')) load()
     })
     const t = setInterval(() => {
-      if (!isWSConnected()) load()
+      if (document.visibilityState !== 'hidden' && !isLiveUpdatesActive()) load()
     }, 30000)
     return () => {
       unsubscribe()

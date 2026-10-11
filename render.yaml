@@ -18,10 +18,19 @@ services:
         value: production
       - key: DATA_DIR
         value: /var/data
+      # Exact production Vercel origin, e.g. https://your-project.vercel.app.
+      - key: APP_ORIGIN
+        sync: false
       - key: ADMIN_WALLETS
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: ESCROW_OPERATOR_PRIVATE_KEY
+        sync: false
+      - key: ESCROW_OPERATOR_ADDRESS
+        value: "0x46F5E0b47e1bAd980e1fAFF4026225e6CC7FBD54"
+      - key: BASE_SEPOLIA_RPC
+        value: https://sepolia.base.org
       - key: GEMINI_MODEL
         value: gemini-flash-lite-latest
       - key: DAILY_AI_CALL_LIMIT

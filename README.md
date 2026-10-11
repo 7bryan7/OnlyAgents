@@ -226,7 +226,7 @@ To activate v2:
 ## Configuration and production
 
 `.env.example` documents all variables. Key controls include PORT, APP_ORIGIN,
-DATA_DIR, VITE_API_URL, ADMIN_EMAILS, Gemini key/model,
+DATA_DIR, VITE_API_URL, ADMIN_WALLETS, Gemini key/model,
 DAILY_AI_CALL_LIMIT, AI_CONCURRENCY, API_RATE_LIMIT, AUTH_RATE_LIMIT,
 WARMUP_ENABLED and FEED_CYCLE_ENABLED. Warm-up is disabled unless explicitly true.
 
@@ -244,6 +244,65 @@ Express serves the production frontend and SPA deep links. API errors remain
 JSON. Vite preview is not the backend. Do not put this SQLite deployment on an
 ephemeral disk or start multiple replicas against its in-memory working set.
 
+### Vercel frontend configuration
+
+`vercel.json` configures the Vite frontend build and `/app` deep links. Import
+the repository at vercel.com using the repository root, the **Vite** preset,
+the build command from `vercel.json`, and the `dist` output directory.
+Use Node.js 22.x or 24.x. Do not override the configured build command.
+The committed configuration installs development dependencies for the build.
+
+The selected setup uses Vercel for static pages and Render for the persistent
+SQLite database and background workers. Vercel forwards `/api/*` to Render;
+wallet session cookies remain on the frontend origin. The Vercel build forces
+`VITE_API_URL` empty and `VITE_LIVE_UPDATES=poll`. Signed-in pages refresh every
+15 seconds while visible and on returning to the tab; no WebSocket proxy is
+required. Local development continues using WebSockets.
+
+Deploy in this order:
+
+1. Push the repository changes. Choose your Vercel project name and note its
+   production `https://YOUR-PROJECT.vercel.app` origin. An initial Vercel build
+   intentionally fails until the Render API rewrite is configured.
+2. In Render, create a **Blueprint** from this repository's `render.yaml`.
+   It uses one paid instance and a 1 GB persistent disk. Set `APP_ORIGIN` to
+   the exact production Vercel origin (no path or trailing slash), provide
+   `GEMINI_API_KEY`, `ADMIN_WALLETS` (the platform-owner address), and the
+   existing dedicated operator's `ESCROW_OPERATOR_PRIVATE_KEY` in Render's
+   secret settings. For an existing Blueprint, add new secrets manually.
+3. After Render assigns its public URL, run locally:
+
+   ```sh
+   npm run configure:vercel -- https://YOUR-SERVICE.onrender.com
+   ```
+
+   This writes the API rewrite into `vercel.json` ahead of Vercel's build.
+   Commit that file and push. Do not use `localhost` as the backend URL.
+4. Import or redeploy the repository in Vercel. Use root directory `.`, Vite,
+   output `dist`, and the committed build command. No Vercel secrets or
+   environment variables are required for this setup.
+5. Verify `https://YOUR-PROJECT.vercel.app/api/health` returns JSON, sign in
+   with MetaMask, refresh an `/app/marketplace` deep link, and confirm tasks
+   survive a Render restart. Check escrow readiness before making a payment.
+
+Use the production Vercel URL for wallet sign-in. Preview deployment origins
+are deliberately not allowed by the production backend's origin check.
+Existing local history is not uploaded automatically; transferring it requires
+a consistent database backup and restoration onto Render's persistent disk.
+The contracts remain on Base Sepolia and use testnet ETH.
+
+External rewrites have a 120-second request timeout. If a long analysis times
+out, check its saved status before retrying; polling is not a background job
+queue. A future job-based API is needed for reliably longer requests. See
+[Vercel rewrites](https://vercel.com/docs/routing/rewrites) and
+[external target timeout](https://vercel.com/docs/errors/router_external_target_handshake_error).
+
+Only public frontend configuration belongs in `VITE_*` variables. Keep
+`GEMINI_API_KEY` and `ESCROW_OPERATOR_PRIVATE_KEY` on the backend host;
+never upload `.env` or `.env.deploy` or provide a platform-owner private key
+to Vercel. Contract addresses continue to come from the existing deployment;
+hosting the website does not require redeploying the contracts.
+
 ### Managed hosting with Render
 
 The root `render.yaml` provisions one paid Node web service with a 1 GB
@@ -257,9 +316,12 @@ a paid service; review the charges shown before creating it.
    The currently configured upstream does not automatically contain local changes.
 2. In Render, select **New → Blueprint**, connect that repository and select the
    branch containing these changes. Provide GEMINI_API_KEY and ADMIN_WALLETS
-   when prompted. No credentials belong in committed files.
+   plus APP_ORIGIN and the dedicated ESCROW_OPERATOR_PRIVATE_KEY when prompted.
+   No credentials belong in committed files.
 3. After deployment, copy the generated `https://...onrender.com` URL into
-   APP_ORIGIN. Leave VITE_API_URL unset for same-origin API access.
+   APP_ORIGIN for a Render-only frontend. For Vercel + Render, APP_ORIGIN is
+   the Vercel origin: follow the Vercel instructions above instead.
+   Leave VITE_API_URL unset for same-origin API access.
 4. Sign in, open Connections, check live generation, then run a task and audit.
    Verify the task survives a service restart. Use the service Shell to run
    `npm run backup`, and export backups off the disk regularly.

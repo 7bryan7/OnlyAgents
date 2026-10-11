@@ -5,13 +5,23 @@
 // caller re-fetches via api.js. Reconnection refreshes the current data.
 // ---------------------------------------------------------------------------
 
+import { startPollingUpdates } from './polling'
+
 const BASE = import.meta.env.VITE_API_URL || window.location.origin
+const POLLING = import.meta.env.VITE_LIVE_UPDATES === 'poll'
 
 const listeners = new Set()
 let socket = null
 let retries = 0
 let reconnectTimer = null
 let closedByUs = false
+let stopPolling = null
+
+function emit(msg) {
+  for (const fn of listeners) {
+    try { fn(msg) } catch (e) { console.error('[live updates] listener error:', e) }
+  }
+}
 
 function wsUrl() {
   const base = BASE.replace(/^http/, 'ws')
@@ -38,13 +48,7 @@ function connect() {
     } catch {
       return
     }
-    for (const fn of listeners) {
-      try {
-        fn(msg)
-      } catch (e) {
-        console.error('[ws] listener error:', e)
-      }
-    }
+    emit(msg)
   }
 
   socket.onclose = () => {
@@ -74,8 +78,13 @@ function scheduleReconnect() {
 /** Subscribe to backend push events. Returns an unsubscribe function. */
 export function onWSMessage(fn) {
   listeners.add(fn)
-  connect()
-  return () => listeners.delete(fn)
+  if (POLLING) {
+    if (!stopPolling && !closedByUs) stopPolling = startPollingUpdates(emit)
+  } else connect()
+  return () => {
+    listeners.delete(fn)
+    if (!listeners.size && stopPolling) { stopPolling(); stopPolling = null }
+  }
 }
 
 /** True when a live socket is currently open. */
@@ -83,9 +92,15 @@ export function isWSConnected() {
   return Boolean(socket && socket.readyState === WebSocket.OPEN)
 }
 
+export function isLiveUpdatesActive() {
+  return Boolean(stopPolling) || isWSConnected()
+}
+
 /** Close permanently (e.g. app teardown). */
 export function closeWS() {
   closedByUs = true
+  stopPolling?.()
+  stopPolling = null
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
