@@ -2,8 +2,6 @@ services:
   app:
     build:
       context: .
-      args:
-        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:?Set VITE_GOOGLE_CLIENT_ID in .env}
     env_file: .env
     environment:
       NODE_ENV: production

@@ -33,7 +33,7 @@ export async function withModelSlot(work) {
 }
 const buckets = new Map()
 export function rateLimit(req, res, next) {
-  const now = Date.now(), key = req.user?.email || req.ip
+  const now = Date.now(), key = req.user?.walletAddress || req.ip
   let bucket = buckets.get(key)
   if (!bucket || now >= bucket.until) { bucket = { count: 0, until: now + 60000 }; buckets.set(key, bucket) }
   const limit = req.baseUrl === '/api/auth' ? Number(process.env.AUTH_RATE_LIMIT) || 60 : Number(process.env.API_RATE_LIMIT) || 600

@@ -16,7 +16,7 @@ contract AgentFactory is ERC721, Ownable {
     uint256 public constant MINT_FEE = 0.001 ether;
 
     /// Platform treasury — receives every mint fee.
-    address public treasury;
+    address public constant treasury = 0x2e0113c8806c8bFFd9cAA0861a9D1ffFE66E48A8;
 
     /// Next token id (1-based).
     uint256 private _nextTokenId = 1;
@@ -26,9 +26,8 @@ contract AgentFactory is ERC721, Ownable {
 
     event AgentMinted(address indexed owner, bytes32 indexed metadataHash, uint256 indexed tokenId);
 
-    constructor(address treasury_) ERC721("OnlyAgent", "OA") Ownable(msg.sender) {
-        require(treasury_ != address(0), "AgentFactory: zero treasury");
-        treasury = treasury_;
+    constructor(address treasury_) ERC721("OnlyAgent", "OA") Ownable(treasury) {
+        require(treasury_ == treasury, "AgentFactory: fixed platform treasury");
     }
 
     /// @notice Mint a custom agent. metadataHash is a keccak256 of the agent
@@ -52,12 +51,6 @@ contract AgentFactory is ERC721, Ownable {
         require(okFee, "AgentFactory: fee transfer failed");
 
         emit AgentMinted(msg.sender, metadataHash, tokenId);
-    }
-
-    /// @notice Owner can redirect the treasury (e.g. to a multisig).
-    function setTreasury(address treasury_) external onlyOwner {
-        require(treasury_ != address(0), "AgentFactory: zero treasury");
-        treasury = treasury_;
     }
 
     /// @notice Withdraw any accidental direct ETH sent to the contract.

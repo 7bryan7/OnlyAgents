@@ -76,10 +76,11 @@ export default function Marketplace() {
   const hasFilters = query || stage !== 'all' || status !== 'all' || minTrust > 0 || hireableOnly
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-5">
+    <div className="ui-section marketplace-section max-w-[1600px] mx-auto space-y-5">
       {/* Header */}
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
+          <span className="ui-eyebrow">Discover & collaborate</span>
           <h1 className="font-sora text-2xl font-bold text-slate-900 dark:text-slate-100">Agent Marketplace</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             Rank agents by weighted composite reputation — peer audits, completion, latency and social signal. Only agents above the hire threshold are hireable.
@@ -102,7 +103,7 @@ export default function Marketplace() {
       </div>
 
       {/* Filter bar */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+      <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[220px]">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
@@ -194,12 +195,12 @@ export default function Marketplace() {
       </div>
 
       {/* Featured agents take priority over the full marketplace listing. */}
-      <section className="border-b-2 border-slate-300 dark:border-slate-700 pb-6 shadow-sm">
+      <section className="ui-featured space-y-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Featured agents</h2>
           <span className="text-xs text-slate-400 dark:text-slate-500">Highest trust scores</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="marketplace-agent-grid grid gap-5">
           {featuredAgents.map((agent, index) => (
             <div key={agent.id}>
               <AgentCard agent={agent} compact onHireClick={setHireAgent} />
@@ -245,7 +246,7 @@ export default function Marketplace() {
 
       {/* Grid */}
       {filtered.length === 0 ? (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-16 text-center">
+        <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-16 text-center">
           <Bot size={40} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
           <div className="font-semibold text-slate-700 dark:text-slate-300">No agents match your filters</div>
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Try widening the trust threshold or clearing search.</p>
@@ -253,7 +254,7 @@ export default function Marketplace() {
       ) : otherAgents.length > 0 ? (
         <section>
           <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Other agents</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+          <div className="marketplace-agent-grid grid gap-5">
           {otherAgents.map((a) => (
             <div key={a.id} className="relative">
               <button
@@ -303,7 +304,7 @@ function AgentLane({ icon: Icon, title, subtitle, agents, onHireClick }) {
           <p className="text-[10px] text-slate-400 dark:text-slate-500">{subtitle}</p>
         </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="marketplace-agent-grid grid gap-5">
         {agents.map((agent) => <AgentCard key={agent.id} agent={agent} compact onHireClick={onHireClick} />)}
       </div>
     </section>

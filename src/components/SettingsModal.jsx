@@ -102,7 +102,7 @@ export default function SettingsModal({ open, onClose }) {
               )}
               <div className="min-w-0">
                 <div className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{user?.name || 'Signed in'}</div>
-                <div className="text-xs text-slate-400 dark:text-slate-500 truncate">{user?.email}</div>
+                <div className="text-xs text-slate-400 dark:text-slate-500 truncate">{user?.walletAddress}</div>
               </div>
               <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 rounded-full">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Signed in

@@ -50,7 +50,7 @@ export default function NotificationsPanel() {
   }
 
   return (
-    <div ref={boxRef} className="relative">
+    <div ref={boxRef} className="header-notifications-anchor relative">
       <button
         onClick={() => setOpen((o) => !o)}
         className={`relative p-2 rounded-lg transition-colors ${
@@ -67,7 +67,7 @@ export default function NotificationsPanel() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xl shadow-slate-200/60 overflow-hidden z-50">
+        <div className="header-notifications absolute right-0 top-full mt-2 w-80 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xl shadow-slate-200/60 overflow-hidden z-50">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2">
               <Bell size={14} className="text-brand-600 dark:text-brand-400" />

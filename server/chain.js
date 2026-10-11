@@ -11,12 +11,13 @@ import './env.js'
 // the call to AgentFactory.
 // ---------------------------------------------------------------------------
 
-import { createPublicClient, http, keccak256, toBytes, getAddress, parseAbiItem, decodeEventLog } from 'viem'
+import { createPublicClient, http, keccak256, toBytes, parseAbi, parseAbiItem, decodeEventLog } from 'viem'
 import { baseSepolia } from 'viem/chains'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const RPC = process.env.BASE_SEPOLIA_RPC || 'https://sepolia.base.org'
+export const PLATFORM_OWNER_ADDRESS = '0x2e0113c8806c8bFFd9cAA0861a9D1ffFE66E48A8'
 
 export const publicClient = createPublicClient({
   chain: baseSepolia,
@@ -37,7 +38,26 @@ function loadDeployed() {
 const deployed = loadDeployed()
 export const AGENT_FACTORY_ADDRESS = process.env.BASE_SEPOLIA_AGENT_FACTORY || deployed?.agentFactory || null
 export const TASK_ESCROW_ADDRESS = process.env.BASE_SEPOLIA_TASK_ESCROW || deployed?.taskEscrow || null
-export const TREASURY_ADDRESS = process.env.TREASURY || deployed?.treasury || null
+export const LEGACY_ESCROW_ADDRESS = process.env.LEGACY_TASK_ESCROW || deployed?.legacyTaskEscrow || TASK_ESCROW_ADDRESS
+export const TREASURY_ADDRESS = PLATFORM_OWNER_ADDRESS
+
+export async function factoryReadiness() {
+  if (!AGENT_FACTORY_ADDRESS) return { ready: false, error: 'Deploy AgentFactory before enabling paid mints.' }
+  try {
+    const abi = parseAbi(['function owner() view returns (address)', 'function treasury() view returns (address)'])
+    const [owner, treasury, chainId] = await Promise.all([
+      publicClient.readContract({ address: AGENT_FACTORY_ADDRESS, abi, functionName: 'owner' }),
+      publicClient.readContract({ address: AGENT_FACTORY_ADDRESS, abi, functionName: 'treasury' }),
+      publicClient.getChainId(),
+    ])
+    if (chainId !== baseSepolia.id || owner.toLowerCase() !== PLATFORM_OWNER_ADDRESS.toLowerCase() || treasury.toLowerCase() !== PLATFORM_OWNER_ADDRESS.toLowerCase()) {
+      return { ready: false, error: 'Mint contract must use Base Sepolia and the platform owner as owner and fee recipient.' }
+    }
+    return { ready: true }
+  } catch {
+    return { ready: false, error: 'Cannot verify the mint contract owner and fee recipient.' }
+  }
+}
 
 // keccak256 of the agent profile — must match the frontend's computation.
 export function metadataHashOf({ name, personaPrompt, specialty }) {
@@ -140,11 +160,9 @@ export async function verifyCreateTask(txHash, expectedConsumer, expectedAgentOw
     return { ok: false, error: 'transaction not found on chain' }
   }
   if (!receipt) return { ok: false, error: 'transaction not found on chain' }
-  if (receipt.status !== 'success') return { ok: false, error: 'transaction reverted on chain' }
-  if (getAddress(receipt.to || "0x0000000000000000000000000000000000000000") !== getAddress(TASK_ESCROW_ADDRESS)) {
-    return { ok: false, error: 'transaction did not call TaskEscrow' }
-  }
-
+  if (receipt.status !== 'success') return { ok: false, error: 'transaction reverted on chain', reverted: true }
+  // Wallet wrappers can forward createTask, making receipt.to the wallet.
+  // Only a matching event emitted by our escrow proves the payment reached it.
   const created = decodeLogs(receipt, TASK_ESCROW_ADDRESS, TASK_CREATED).find(
     (l) =>
       l.args.consumer.toLowerCase() === expectedConsumer.toLowerCase() &&
@@ -166,8 +184,8 @@ export async function verifyCreateTask(txHash, expectedConsumer, expectedAgentOw
  * @param {bigint|string} expectedTaskId
  * @returns {Promise<{ok: boolean, error?: string, payout?: bigint, fee?: bigint, released?: boolean}>}
  */
-export async function verifyCompleteTask(txHash, expectedTaskId) {
-  if (!TASK_ESCROW_ADDRESS) {
+export async function verifyCompleteTask(txHash, expectedTaskId, escrowAddress = TASK_ESCROW_ADDRESS) {
+  if (!escrowAddress) {
     return { ok: false, error: 'TaskEscrow not deployed — no deployed.json and no BASE_SEPOLIA_TASK_ESCROW env' }
   }
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
@@ -181,22 +199,18 @@ export async function verifyCompleteTask(txHash, expectedTaskId) {
     return { ok: false, error: 'transaction not found on chain' }
   }
   if (!receipt) return { ok: false, error: 'transaction not found on chain' }
-  if (receipt.status !== 'success') return { ok: false, error: 'transaction reverted on chain' }
-  if (getAddress(receipt.to || "0x0000000000000000000000000000000000000000") !== getAddress(TASK_ESCROW_ADDRESS)) {
-    return { ok: false, error: 'transaction did not call TaskEscrow' }
-  }
-
-  const paid = decodeLogs(receipt, TASK_ESCROW_ADDRESS, TASK_PAID).find(
+  if (receipt.status !== 'success') return { ok: false, error: 'transaction reverted on chain', reverted: true }
+  const paid = decodeLogs(receipt, escrowAddress, TASK_PAID).find(
     (l) => l.args.taskId === BigInt(expectedTaskId)
   )
   if (paid) {
-    return { ok: true, payout: paid.args.payout, fee: paid.args.fee, released: false }
+    return { ok: true, payout: paid.args.payout, fee: paid.args.fee, agentOwner: paid.args.agentOwner, released: false }
   }
-  const released = decodeLogs(receipt, TASK_ESCROW_ADDRESS, TASK_RELEASED).find(
+  const released = decodeLogs(receipt, escrowAddress, TASK_RELEASED).find(
     (l) => l.args.taskId === BigInt(expectedTaskId)
   )
   if (released) {
-    return { ok: true, payout: released.args.payout, fee: released.args.fee, released: true }
+    return { ok: true, payout: released.args.payout, fee: released.args.fee, agentOwner: released.args.agentOwner, released: true }
   }
   return { ok: false, error: 'no TaskPaid/TaskReleased event matching this taskId in the transaction' }
 }

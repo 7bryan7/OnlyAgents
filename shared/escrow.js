@@ -1,0 +1,25 @@
+import { parseAbi } from 'viem'
+
+export const ESCROW_ABI = parseAbi([
+  'function VERSION() view returns (uint256)',
+  'function owner() view returns (address)',
+  'function treasury() view returns (address)',
+  'function deliveryOperator() view returns (address)',
+  'function timeout() view returns (uint256)',
+  'function tasks(uint256) view returns (address consumer, address agentOwner, uint256 amount, uint256 createdAt, bool completed, bool released, uint256 deliveredAt, uint256 reviewDeadline, bytes32 outputHash, bool disputed, bool refunded, uint256 revisions)',
+  'function createTask(address agentOwner, uint256 amount) payable returns (uint256 taskId)',
+  'function markDelivered(uint256 taskId, bytes32 outputHash)',
+  'function holdRevision(uint256 taskId)',
+  'function completeTask(uint256 taskId)',
+  'function releaseTask(uint256 taskId)',
+  'function openDispute(uint256 taskId, bytes32 reasonHash)',
+  'function resolveDispute(uint256 taskId, bool refundConsumer)',
+  'event TaskCreated(uint256 indexed taskId, address indexed consumer, address indexed agentOwner, uint256 amount)',
+  'event TaskDelivered(uint256 indexed taskId, bytes32 outputHash, uint256 deliveredAt, uint256 reviewDeadline)',
+  'event RevisionHeld(uint256 indexed taskId, uint256 revision)',
+  'event TaskDisputed(uint256 indexed taskId, address indexed consumer, bytes32 reasonHash)',
+  'event DisputeResolved(uint256 indexed taskId, bool refundConsumer)',
+  'event TaskRefunded(uint256 indexed taskId, address indexed consumer, uint256 amount)',
+  'event TaskPaid(uint256 indexed taskId, address indexed agentOwner, uint256 payout, uint256 fee)',
+  'event TaskReleased(uint256 indexed taskId, address indexed agentOwner, uint256 payout, uint256 fee)',
+])

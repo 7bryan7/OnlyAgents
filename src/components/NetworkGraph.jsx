@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, forceX, forceY } from 'd3-force'
 import { trustColor, STATUS_META } from '../agentMeta'
 import { useData } from '../DataContext'
@@ -6,14 +6,32 @@ import { useNavigate } from 'react-router-dom'
 
 /**
  * Swarm network graph — force-directed layout of agents and their peer-audit edges.
- * Node size ∝ trust score, edge color ∝ audit recency/health.
+ * Node size and ring color reflect trust; center color reflects runtime status.
+ * Each recorded peer relationship appears once, without inferring audit recency.
  */
 export default function NetworkGraph({ height = 460 }) {
   const svgRef = useRef(null)
-  const [selected, setSelected] = useState(null)
-  const [hovered, setHovered] = useState(null)
+  const [selectedId, setSelectedId] = useState(null)
+  const [hoveredId, setHoveredId] = useState(null)
   const navigate = useNavigate()
   const { agents } = useData()
+
+  const selected = agents.find((agent) => agent.id === selectedId)
+  const hovered = agents.find((agent) => agent.id === hoveredId)
+  const links = useMemo(() => {
+    const ids = new Set(agents.map((agent) => agent.id))
+    const relationships = new Map()
+    for (const agent of agents) {
+      for (const peerId of agent.peers || []) {
+        if (peerId === agent.id || !ids.has(peerId)) continue
+        const [source, target] = [agent.id, peerId].sort()
+        const key = JSON.stringify([source, target])
+        if (!relationships.has(key)) relationships.set(key, { source, target, key })
+      }
+    }
+    return [...relationships.values()]
+  }, [agents])
+  const neighbors = new Set(links.filter((link) => link.source === selectedId || link.target === selectedId).flatMap((link) => [link.source, link.target]))
 
   useEffect(() => {
     const svg = svgRef.current
@@ -27,24 +45,17 @@ export default function NetworkGraph({ height = 460 }) {
       if (width <= 0) return // container not laid out yet — ResizeObserver will retry
       const h = height
 
-      const nodes = agents.map((a) => ({
-        id: a.id,
-        agent: a,
-        // Random start positions — starting every node at the center makes the
-        // first many-body tick explode the layout far outside the viewport.
-        x: Math.random() * width,
-        y: Math.random() * h,
+      const nodes = agents.map((agent, index) => ({
+        id: agent.id,
+        x: width / 2 + Math.cos(index * 2.39996) * Math.sqrt(index + 1) * 18,
+        y: h / 2 + Math.sin(index * 2.39996) * Math.sqrt(index + 1) * 18,
       }))
-      const links = []
-      agents.forEach((a) => {
-        a.peers.forEach((pid) => {
-          links.push({ source: a.id, target: pid })
-        })
-      })
+      // d3 mutates link endpoints; keep the React relationship data immutable.
+      const layoutLinks = links.map((link) => ({ ...link }))
 
       if (sim) sim.stop()
       sim = forceSimulation(nodes)
-        .force('link', forceLink(links).id((d) => d.id).distance(70).strength(0.5))
+        .force('link', forceLink(layoutLinks).id((d) => d.id).distance(70).strength(0.5))
         .force('charge', forceManyBody().strength(-260))
         .force('center', forceCenter(width / 2, h / 2))
         // Weak centering keeps the cluster inside the viewport after ticks.
@@ -56,13 +67,19 @@ export default function NetworkGraph({ height = 460 }) {
       // Run a fixed number of ticks for a stable layout
       for (let i = 0; i < 220; i++) sim.tick()
 
+      // Keep node rings and labels inside narrow viewports.
+      for (const node of nodes) {
+        node.x = Math.max(Math.min(56, width / 2), Math.min(width - Math.min(56, width / 2), node.x))
+        node.y = Math.max(32, Math.min(h - 48, node.y))
+      }
+
       const g = svg.querySelector('g.network')
       if (!g) return
 
       // Edges
       const edgeSel = g.querySelectorAll('line.edge')
       edgeSel.forEach((el, i) => {
-        const l = links[i]
+        const l = layoutLinks[i]
         el.setAttribute('x1', l.source.x)
         el.setAttribute('y1', l.source.y)
         el.setAttribute('x2', l.target.x)
@@ -80,7 +97,7 @@ export default function NetworkGraph({ height = 460 }) {
     layout()
 
     // Re-layout when the container gains width or resizes (e.g. narrow panels,
-    // sidebar collapse, window resize) — the old code measured once at mount
+    // header wrapping, window resize) — the old code measured once at mount
     // and stayed broken forever if the width was 0 at that moment.
     const ro = new ResizeObserver(() => layout())
     ro.observe(svg)
@@ -89,20 +106,22 @@ export default function NetworkGraph({ height = 460 }) {
       ro.disconnect()
       if (sim) sim.stop()
     }
-  }, [height, agents])
+  }, [height, agents, links])
 
-  const nodeRadius = (a) => 10 + (a.trustScore / 100) * 14
+  const nodeRadius = (a) => 10 + (Math.max(0, Math.min(100, a.trustScore)) / 100) * 14
 
   return (
     <div className="relative" style={{ height }}>
-      <svg ref={svgRef} width="100%" height={height} className="block">
+      <svg ref={svgRef} width="100%" height={height} className="block" aria-label="Agent peer-audit network" onClick={() => setSelectedId(null)}>
         <g className="network">
-          {agents.flatMap((a) => a.peers.map((pid) => ({ a, pid }))).map(({ a, pid }, i) => {
-            const isHot = selected && (selected.id === a.id || selected.id === pid)
+          {links.map(({ source, target, key }) => {
+            const isHot = selected && (selected.id === source || selected.id === target)
             return (
               <line
-                key={i}
+                key={key}
                 className="edge"
+                data-source={source}
+                data-target={target}
                 stroke={isHot ? '#3d6cec' : 'var(--graph-edge)'}
                 strokeWidth={isHot ? 2 : 1}
                 strokeOpacity={isHot ? 0.9 : 0.5}
@@ -112,19 +131,30 @@ export default function NetworkGraph({ height = 460 }) {
           {agents.map((a) => {
             const r = nodeRadius(a)
             const isSel = selected && selected.id === a.id
-            const isNeighbor = selected && a.peers.includes(selected.id)
+            const isNeighbor = selected && neighbors.has(a.id)
             const dim = selected && !isSel && !isNeighbor
-            const meta = STATUS_META[a.status]
+            const meta = STATUS_META[a.status] || STATUS_META.idle
             return (
               <g
                 key={a.id}
                 className="node"
+                data-agent-id={a.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`${a.name}: trust ${a.trustScore.toFixed(0)}, ${meta.label}`}
+                aria-pressed={Boolean(isSel)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setSelectedId(isSel ? null : a.id)
+                  }
+                }}
                 style={{ cursor: 'pointer', opacity: dim ? 0.25 : 1, transition: 'opacity 0.2s' }}
-                onMouseEnter={() => setHovered(a)}
-                onMouseLeave={() => setHovered(null)}
+                onMouseEnter={() => setHoveredId(a.id)}
+                onMouseLeave={() => setHoveredId(null)}
                 onClick={(e) => {
                   e.stopPropagation()
-                  setSelected(isSel ? null : a)
+                  setSelectedId(isSel ? null : a.id)
                 }}
                 onDoubleClick={() => navigate(`/app/agents/${a.id}`)}
               >
@@ -147,6 +177,7 @@ export default function NetworkGraph({ height = 460 }) {
         <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500" /> Degraded</div>
         <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500" /> Stalled</div>
         <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-400" /> Idle</div>
+        <div className="mt-1.5 text-slate-500 dark:text-slate-400">Size &amp; ring: trust · Dot: status<br />Lines: recorded peer audits</div>
         <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-slate-400 dark:border-slate-700 dark:text-slate-500">Click: select · Double-click: open</div>
       </div>
 
@@ -154,8 +185,8 @@ export default function NetworkGraph({ height = 460 }) {
       {(hovered || selected) && (
         <div className="absolute bottom-3 right-3 bg-white rounded-xl border border-slate-200 shadow-lg px-4 py-3 w-64 dark:bg-slate-900 dark:border-slate-700">
           {(() => {
-            const a = hovered || selected
-            const meta = STATUS_META[a.status]
+            const a = selected || hovered
+            const meta = STATUS_META[a.status] || STATUS_META.idle
             return (
               <>
                 <div className="flex items-center justify-between">

@@ -1,8 +1,13 @@
 {
   "network": "baseSepolia",
   "chainId": 84532,
-  "treasury": "0xc76698F89d3A54E87459F8F9e6f3D081c5456339",
-  "agentFactory": "0x10D83196228285f20983E6468E46e7A0c5f8F0fb",
-  "taskEscrow": "0x56cFD889f5E40Af2bF7017eE2E0Cd1766FEde699",
-  "deployedAt": "2026-08-30T19:24:51.761Z"
+  "treasury": "0x2e0113c8806c8bFFd9cAA0861a9D1ffFE66E48A8",
+  "agentFactory": "0xCA449BAbE421dDce6392921a957F98068e695D47",
+  "legacyAgentFactory": "0x5B8b4BC6ee2B8107a304778DAA96E3D9C26906a5",
+  "taskEscrow": "0x6BaD7C16a32D72dD33f3EE8bBcD4f11c192aE284",
+  "escrowVersion": 2,
+  "deliveryOperator": "0x46F5E0b47e1bAd980e1fAFF4026225e6CC7FBD54",
+  "reviewWindowHours": 48,
+  "legacyTaskEscrow": "0x491dB47F85d52264551CFeAC021bc60776B37219",
+  "deployedAt": "2026-10-11T09:25:38.733Z"
 }

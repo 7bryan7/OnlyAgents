@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { Network, Activity, Zap, Bot, Play, Loader2, FileText, Clock, ChevronRight, CheckCircle2, XCircle } from 'lucide-react'
+import { Zap, Play, Loader2, FileText, Clock, ChevronRight, CheckCircle2, XCircle } from 'lucide-react'
 import NetworkGraph from '../components/NetworkGraph'
-import { trustColor, STATUS_META } from '../agentMeta'
 import { useData } from '../DataContext'
 import { api } from '../api'
 
@@ -16,13 +14,7 @@ function timeAgo(ts) {
 }
 
 export default function Swarms() {
-  const { swarms, agents, mode } = useData()
-  const [params] = useSearchParams()
-  const [selectedSwarm, setSelectedSwarm] = useState(params.get('swarm') || swarms[0]?.id)
-  useEffect(() => { if (params.get('swarm')) setSelectedSwarm(params.get('swarm')) }, [params])
-  const swarm = swarms.find((s) => s.id === selectedSwarm) || swarms[0]
-  const members = swarm ? swarm.agents.map((id) => agents.find((a) => a.id === id)).filter(Boolean) : []
-
+  const { agents, mode, loading } = useData()
   // --- swarm analysis state ---
   const [task, setTask] = useState('')
   const [count, setCount] = useState(4)
@@ -31,6 +23,11 @@ export default function Swarms() {
   const [runs, setRuns] = useState([])
   const [error, setError] = useState('')
   const [workspace, setWorkspace] = useState('public')
+  const [selectedAgentIds, setSelectedAgentIds] = useState([])
+  const selectedAgents = agents.filter((agent) => selectedAgentIds.includes(agent.id))
+  const customSelectionValid = selectedAgentIds.length === 0 || (selectedAgentIds.length >= 3 && selectedAgents.length === selectedAgentIds.length && selectedAgents.every((agent) => agent.status !== 'stalled'))
+  const contributorCount = selectedAgentIds.length || count
+  const toggleAgent = (id) => setSelectedAgentIds((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : ids.length < 5 ? [...ids, id] : ids)
 
   const loadRuns = useCallback(async () => {
     try {
@@ -46,12 +43,12 @@ export default function Swarms() {
   }, [loadRuns])
 
   const analyze = async () => {
-    if (!task.trim() || running) return
+    if (!task.trim() || running || !customSelectionValid) return
     setRunning(true)
     setError('')
     setRun(null)
     try {
-      const d = await api.analyzeSwarm({ task: task.trim(), count })
+      const d = await api.analyzeSwarm({ task: task.trim(), count: contributorCount, ...(selectedAgentIds.length ? { agentIds: selectedAgentIds } : {}) })
       setRun(d.run)
       loadRuns()
     } catch (e) {
@@ -65,26 +62,27 @@ export default function Swarms() {
     ? run.agentIds.map((id) => agents.find((a) => a.id === id)).filter(Boolean)
     : []
 
-  if (!swarm) {
+  if (loading) {
     return <div className="text-center py-24 text-slate-400 dark:text-slate-500 text-sm">Loading swarm data…</div>
   }
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-6">
+    <div className="ui-section swarms-section max-w-[1452px] mx-auto space-y-6">
       <div>
-        <h1 className="font-sora text-2xl font-bold text-slate-900 dark:text-slate-100">Swarm Network</h1>
+        <span className="ui-eyebrow">Connected intelligence</span>
+          <h1 className="font-sora text-2xl font-bold text-slate-900 dark:text-slate-100">Swarm Network</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Orchestrated agent groups with dynamic re-ranking driven by peer audits.
+          Recorded peer relationships across the fleet, with private analyses using your chosen agents.
         </p>
       </div>
 
       <div className="inline-flex rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1">
-        <button onClick={() => setWorkspace('public')} className={`px-4 py-2 rounded-lg text-xs font-semibold ${workspace === 'public' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>Public network</button>
-        <button onClick={() => setWorkspace('private')} className={`px-4 py-2 rounded-lg text-xs font-semibold ${workspace === 'private' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>My private analyses</button>
+        <button onClick={() => setWorkspace('public')} aria-pressed={workspace === 'public'} className={`px-4 py-2 rounded-lg text-xs font-semibold ${workspace === 'public' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>Public network</button>
+        <button onClick={() => setWorkspace('private')} aria-pressed={workspace === 'private'} className={`px-4 py-2 rounded-lg text-xs font-semibold ${workspace === 'private' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>My private analyses</button>
       </div>
 
       {/* Swarm analysis — fan one task out to 3-5 agents in parallel */}
-      {workspace === 'private' && <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+      {workspace === 'private' && <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
         <div className="flex items-center gap-2.5 mb-3">
           <div className="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center">
             <Zap size={15} />
@@ -92,10 +90,27 @@ export default function Swarms() {
           <div>
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">Swarm analysis</h3>
             <p className="text-[11px] text-slate-400 dark:text-slate-500">
-              Fan one task out to {count} agents in parallel — each contributes, then the swarm merges a single report.
+              Fan one task out to {contributorCount} agents in parallel — each contributes, then the swarm merges a single report.
             </p>
           </div>
         </div>
+
+        <fieldset disabled={running} className="mb-4 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+          <legend className="px-1 text-sm font-semibold text-slate-800 dark:text-slate-200">Choose swarm agents</legend>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <button type="button" onClick={() => setSelectedAgentIds([])} disabled={!selectedAgentIds.length || running} className="text-xs font-semibold text-brand-600 dark:text-brand-400 disabled:opacity-40">Use automatic selection</button>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Choose 3–5 available agents, including your custom agents, or leave the selection empty for automatic selection.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+            {agents.map((agent) => (
+              <label key={agent.id} className={`flex items-start gap-2 rounded-lg border p-2.5 text-sm ${selectedAgentIds.includes(agent.id) ? 'border-brand-300 bg-brand-50 dark:border-brand-500 dark:bg-brand-500/10' : 'border-slate-100 dark:border-slate-800'}`}>
+                <input type="checkbox" className="mt-1 accent-brand-600" checked={selectedAgentIds.includes(agent.id)} onChange={() => toggleAgent(agent.id)} disabled={running || (agent.status === 'stalled' && !selectedAgentIds.includes(agent.id)) || (!selectedAgentIds.includes(agent.id) && selectedAgentIds.length >= 5)} />
+                <span className="min-w-0"><span className="block font-medium text-slate-800 dark:text-slate-200">{agent.name}</span><span className="block text-xs text-slate-500 dark:text-slate-400">{agent.role}{agent.isCustomAgent ? ' · Custom agent' : ''}{agent.status === 'stalled' ? ' · Unavailable' : ''}</span></span>
+              </label>
+            ))}
+          </div>
+          <p aria-live="polite" className="mt-3 text-xs text-slate-500 dark:text-slate-400">{selectedAgentIds.length ? `${selectedAgentIds.length}/5 selected${customSelectionValid ? '' : ' — select 3–5 available agents to analyze'}` : `Automatic selection: ${count} agents`}</p>
+        </fieldset>
 
         <div className="flex flex-col md:flex-row gap-3">
           <textarea
@@ -108,9 +123,10 @@ export default function Swarms() {
           />
           <div className="flex items-center gap-2">
             <select
-              value={count}
+              aria-label="Automatic swarm size"
+              value={selectedAgentIds.length >= 3 ? contributorCount : count}
               onChange={(e) => setCount(Number(e.target.value))}
-              disabled={running}
+              disabled={running || selectedAgentIds.length > 0}
               className="px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-transparent outline-none text-sm font-semibold text-slate-700 dark:text-slate-300 disabled:opacity-50"
               title="Number of agents in the fan-out"
             >
@@ -122,7 +138,7 @@ export default function Swarms() {
             </select>
             <button
               onClick={analyze}
-              disabled={!task.trim() || running || mode !== 'gemini'}
+              disabled={!task.trim() || running || !customSelectionValid || mode !== 'gemini'}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
             >
               {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
@@ -136,7 +152,7 @@ export default function Swarms() {
         {running && (
           <div className="mt-4 flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
             <Loader2 size={14} className="animate-spin text-brand-600" />
-            {count} agents working in parallel — merging report…
+            {contributorCount} agents working in parallel — merging report…
           </div>
         )}
 
@@ -173,7 +189,7 @@ export default function Swarms() {
                 return (
                   <div
                     key={r.agentId}
-                    className="rounded-xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5"
+                    className="ui-panel rounded-xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5"
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2 min-w-0">
@@ -207,157 +223,27 @@ export default function Swarms() {
         )}
       </div>}
 
-      {workspace === 'public' && <div className="space-y-6">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 text-[11px] text-slate-500 dark:text-slate-400">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Network legend</span>
-            <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-brand-500" /> Agent node</span>
-            <span className="inline-flex items-center gap-1.5"><span className="w-6 h-px bg-slate-400" /> Peer relationship</span>
-            <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Healthy</span>
-            <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Needs review</span>
-            <span className="ml-auto">Node size reflects activity volume</span>
-          </div>
-
-      {/* Swarm selector cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {swarms.map((s) => {
-          const isSel = s.id === selectedSwarm
-          const healthColor = s.health >= 85 ? '#10b981' : s.health >= 75 ? '#f59e0b' : '#ef4444'
-          return (
-            <button
-              key={s.id}
-              onClick={() => setSelectedSwarm(s.id)}
-              className={`card-lift text-left bg-white dark:bg-slate-900 rounded-2xl border-2 p-5 transition-colors ${
-                isSel ? 'border-brand-500' : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isSel ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
-                    <Network size={17} />
-                  </div>
-                  <div className="font-semibold text-slate-900 dark:text-slate-100">{s.name}</div>
-                </div>
-                <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ color: healthColor, background: `${healthColor}14` }}>
-                  {s.health}% health
-                </span>
-              </div>
-              <p className="mt-2.5 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{s.description}</p>
-              <div className="mt-3 flex items-center gap-4 text-[11px] text-slate-400 dark:text-slate-500">
-                <span className="inline-flex items-center gap-1"><Bot size={12} /> {s.agents.length} agents</span>
-                <span className="inline-flex items-center gap-1"><Zap size={12} /> {s.throughput} tasks/24h</span>
-              </div>
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Network + members */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="xl:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{swarm.name} — topology</h3>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">Double-click a node to open its profile</span>
-          </div>
-          <NetworkGraph height={480} />
+      {workspace === 'public' && <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            ['Registered agents', agents.length],
+            ['Active agents', agents.filter((agent) => agent.status === 'active').length],
+            ['Recorded executions', agents.reduce((total, agent) => total + agent.executionsCount, 0)],
+            ['Peer audits', agents.reduce((total, agent) => total + agent.auditsReceived, 0)],
+          ].map(([label, value]) => <div key={label} className="ui-stat rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4"><div className="text-xs text-slate-500 dark:text-slate-400">{label}</div><div className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100 tabular-nums">{value}</div></div>)}
         </div>
-
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Swarm members — ranked by trust</h3>
-          <div className="space-y-2">
-            {[...members]
-              .sort((a, b) => b.trustScore - a.trustScore)
-              .map((a, i) => {
-                const meta = STATUS_META[a.status]
-                return (
-                  <Link
-                    key={a.id}
-                    to={`/app/agents/${a.id}`}
-                    className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                  >
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800">
-                      {i + 1}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">{a.name}</div>
-                      <div className="text-[11px] text-slate-400 dark:text-slate-500">{a.role}</div>
-                    </div>
-                    <div className="text-right flex items-center gap-2">
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ color: meta.color, background: meta.bg }}>
-                        {meta.label}
-                      </span>
-                      <span className="text-sm font-bold tabular-nums" style={{ color: trustColor(a.trustScore) }}>
-                        {a.trustScore.toFixed(0)}
-                      </span>
-                    </div>
-                  </Link>
-                )
-              })}
+        <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Public peer-audit network</h2>
+            <span className="text-xs text-slate-500 dark:text-slate-400">All agents · Recorded audit relationships</span>
           </div>
-
-          <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-            <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Swarm metrics</div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 p-3">
-                <div className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-semibold">Avg trust</div>
-                <div className="text-lg font-bold text-slate-900 dark:text-slate-100 tabular-nums">
-                  {(members.reduce((s, a) => s + a.trustScore, 0) / members.length).toFixed(1)}
-                </div>
-              </div>
-              <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 p-3">
-                <div className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-semibold">Avg completion</div>
-                <div className="text-lg font-bold text-slate-900 dark:text-slate-100 tabular-nums">
-                  {(members.reduce((s, a) => s + a.completionRate, 0) / members.length).toFixed(1)}%
-                </div>
-              </div>
-              <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 p-3">
-                <div className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-semibold">Avg response</div>
-                <div className="text-lg font-bold text-slate-900 dark:text-slate-100 tabular-nums">
-                  {(members.reduce((s, a) => s + a.avgResponseTime, 0) / members.length / 1000).toFixed(2)}s
-                </div>
-              </div>
-              <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 p-3">
-                <div className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-semibold">Audits today</div>
-                <div className="text-lg font-bold text-slate-900 dark:text-slate-100 tabular-nums">
-                  {members.reduce((s, a) => s + a.auditsReceived, 0)}
-                </div>
-              </div>
-            </div>
-          </div>
+          <div className="ui-network-canvas"><NetworkGraph height={560} /></div>
         </div>
-      </div>
-
-      {/* Re-ranking explainer */}
-      <div className="bg-gradient-to-r from-brand-600 to-brand-800 rounded-2xl p-6 text-white flex flex-wrap items-center gap-6">
-        <div className="flex-1 min-w-[260px]">
-          <div className="flex items-center gap-2 font-semibold mb-1">
-            <Activity size={16} />
-            Dynamic re-ranking in action
-          </div>
-          <p className="text-sm text-brand-100 leading-relaxed">
-            When a member&apos;s trust drops below threshold (e.g. repeated failed audits), the orchestrator
-            automatically re-ranks the swarm and routes tasks to the next-best agent — no hardcoded routing.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="bg-white/10 rounded-xl px-4 py-3 text-center">
-            <div className="text-2xl font-bold tabular-nums">{swarm.agents.length}</div>
-            <div className="text-[10px] text-brand-200 uppercase">agents</div>
-          </div>
-          <div className="bg-white/10 rounded-xl px-4 py-3 text-center">
-            <div className="text-2xl font-bold tabular-nums">{swarm.health}%</div>
-            <div className="text-[10px] text-brand-200 uppercase">health</div>
-          </div>
-          <div className="bg-white/10 rounded-xl px-4 py-3 text-center">
-            <div className="text-2xl font-bold tabular-nums">{swarm.throughput}</div>
-            <div className="text-[10px] text-brand-200 uppercase">tasks/24h</div>
-          </div>
-        </div>
-      </div>
-        </div>}
+      </div>}
 
       {/* Analysis history */}
       {workspace === 'private' && runs.length > 0 && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+        <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <div className="flex items-center gap-2 mb-3">
             <Clock size={14} className="text-slate-400" />
             <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Recent analyses</h3>

@@ -11,16 +11,14 @@ import { useState, useCallback, useEffect, useRef, createContext, createElement,
 import { createWalletClient, createPublicClient, custom, keccak256, toBytes, parseEther, getAddress } from 'viem'
 import { baseSepolia } from 'viem/chains'
 import { api } from '../api'
+import { ESCROW_ABI } from '../../shared/escrow.js'
 
 const MINT_FEE = parseEther('0.001')
 
-async function verifyOwnership(provider, address) {
+async function verifyOwnership(address) {
   const { wallets } = await api.walletStatus()
   if (wallets.some((w) => w.wallet.toLowerCase() === address.toLowerCase())) return
-  const { message } = await api.walletChallenge(address)
-  const client = createWalletClient({ transport: custom(provider) })
-  const signature = await client.signMessage({ account: address, message })
-  await api.verifyWallet(address, signature)
+  throw new Error('Sign out and sign in with the connected wallet before submitting a payment.')
 }
 
 const FACTORY_ABI = [
@@ -30,26 +28,6 @@ const FACTORY_ABI = [
     stateMutability: 'payable',
     inputs: [{ type: 'bytes32', name: 'metadataHash' }],
     outputs: [{ type: 'uint256', name: 'tokenId' }],
-  },
-]
-
-const ESCROW_ABI = [
-  {
-    type: 'function',
-    name: 'createTask',
-    stateMutability: 'payable',
-    inputs: [
-      { type: 'address', name: 'agentOwner' },
-      { type: 'uint256', name: 'amount' },
-    ],
-    outputs: [{ type: 'uint256', name: 'taskId' }],
-  },
-  {
-    type: 'function',
-    name: 'completeTask',
-    stateMutability: 'nonpayable',
-    inputs: [{ type: 'uint256', name: 'taskId' }],
-    outputs: [],
   },
 ]
 
@@ -68,7 +46,12 @@ export function useWallet() {
   return useContext(WalletContext)
 }
 function walletError(e) {
-  const code = Number(e?.code ?? e?.data?.originalError?.code)
+  let source = e
+  let code
+  for (let depth = 0; source && depth < 8; depth++, source = source.cause) {
+    code = Number(source.code ?? source.data?.originalError?.code)
+    if (code === 4001 || code === -32002) break
+  }
   if (code === 4001) return 'Wallet request declined. Click Connect wallet to try again.'
   if (code === -32002) return 'A wallet request is already pending. Open MetaMask and approve or reject it.'
   return e?.shortMessage || e?.message || 'Wallet connection failed. Open MetaMask and try again.'
@@ -191,7 +174,11 @@ function useWalletState() {
       }
       setError(null)
       try {
-        await verifyOwnership(provider, address)
+        const { chain: configuration } = await api.chain()
+        if (!configuration?.factoryReady || configuration.agentFactory?.toLowerCase() !== factoryAddress?.toLowerCase()) {
+          throw new Error(configuration?.factoryError || 'The mint contract is not ready to receive platform payments.')
+        }
+        await verifyOwnership(address)
         await ensureChain(provider)
         const walletClient = createWalletClient({ chain: baseSepolia, transport: custom(provider) })
         const metadataHash = keccak256(toBytes(`${name}|${personaPrompt}|${specialty}`))
@@ -217,14 +204,18 @@ function useWalletState() {
 
   // Lock payment in TaskEscrow when hiring an agent (PRD §4.6)
   const createEscrowTask = useCallback(
-    async ({ escrowAddress, agentOwner, amountEth }) => {
+    async ({ escrowAddress, agentOwner, amountEth, onSubmitted, onReverted }) => {
       if (!provider || !address) {
         setError('Connect your wallet first')
         return null
       }
       setError(null)
       try {
-        await verifyOwnership(provider, address)
+        const { chain } = await api.chain()
+        if (!chain?.escrowReady || chain.taskEscrow?.toLowerCase() !== escrowAddress?.toLowerCase()) {
+          throw new Error(chain?.escrowError || 'Dispute-aware escrow hiring is not ready.')
+        }
+        await verifyOwnership(address)
         await ensureChain(provider)
         const walletClient = createWalletClient({ chain: baseSepolia, transport: custom(provider) })
         const txHash = await walletClient.writeContract({
@@ -235,13 +226,15 @@ function useWalletState() {
           value: parseEther(String(amountEth)),
           account: address,
         })
+        onSubmitted?.(txHash)
         const reader = createPublicClient({ chain: baseSepolia, transport: custom(provider) })
         const receipt = await reader.waitForTransactionReceipt({ hash: txHash, timeout: 120000 })
-        if (receipt.status !== 'success') throw new Error('Transaction reverted')
+        if (receipt.status !== 'success') { onReverted?.(); throw new Error('Transaction reverted') }
         return txHash
       } catch (e) {
-        setError(e?.shortMessage || e?.message || 'Escrow transaction failed')
-        return null
+        const message = walletError(e)
+        setError(message)
+        throw new Error(message, { cause: e })
       }
     },
     [address, ensureChain, provider]
@@ -249,7 +242,7 @@ function useWalletState() {
 
   // Consumer confirms completion → releases payout to the agent owner
   const completeEscrowTask = useCallback(
-    async ({ escrowAddress, taskId }) => {
+    async ({ escrowAddress, taskId, onSubmitted, onReverted }) => {
       if (!provider || !address) {
         setError('Connect your wallet first')
         return null
@@ -265,17 +258,39 @@ function useWalletState() {
           args: [BigInt(taskId)],
           account: address,
         })
+        onSubmitted?.(txHash)
         const reader = createPublicClient({ chain: baseSepolia, transport: custom(provider) })
         const receipt = await reader.waitForTransactionReceipt({ hash: txHash, timeout: 120000 })
-        if (receipt.status !== 'success') throw new Error('Transaction reverted')
+        if (receipt.status !== 'success') { onReverted?.(); throw new Error('Transaction reverted') }
         return txHash
       } catch (e) {
-        setError(e?.shortMessage || e?.message || 'Confirmation transaction failed')
-        return null
+        const message = walletError(e)
+        setError(message)
+        throw new Error(message, { cause: e })
       }
     },
     [address, ensureChain, provider]
   )
 
-  return { address, chainId, connecting, error, connect, mintAgent, createEscrowTask, completeEscrowTask, setError }
+  const disputeTransaction = useCallback(async ({ escrowAddress, taskId, reason, refundConsumer, onSubmitted, onReverted }) => {
+    if (!provider || !address) { setError('Connect your wallet first'); return null }
+    setError(null)
+    try {
+      await ensureChain(provider)
+      const client = createWalletClient({ chain: baseSepolia, transport: custom(provider) })
+      const resolving = typeof refundConsumer === 'boolean'
+      const hash = await client.writeContract({
+        address: escrowAddress, abi: ESCROW_ABI, account: address,
+        functionName: resolving ? 'resolveDispute' : 'openDispute',
+        args: [BigInt(taskId), resolving ? refundConsumer : keccak256(toBytes(reason))],
+      })
+      onSubmitted?.(hash)
+      const reader = createPublicClient({ chain: baseSepolia, transport: custom(provider) })
+      const receipt = await reader.waitForTransactionReceipt({ hash, timeout: 120000 })
+      if (receipt.status !== 'success') { onReverted?.(); throw new Error('Dispute transaction reverted') }
+      return hash
+    } catch (e) { setError(walletError(e)); return null }
+  }, [provider, address, ensureChain])
+
+  return { address, chainId, connecting, error, connect, mintAgent, createEscrowTask, completeEscrowTask, disputeTransaction, setError }
 }

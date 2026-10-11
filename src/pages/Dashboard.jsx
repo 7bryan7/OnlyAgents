@@ -41,23 +41,25 @@ export default function Dashboard() {
   const heatmap = agents[0].heatmap.map((row, i) => ({ day: row.day, hours: row.hours.map((_, h) => agents.reduce((sum, a) => sum + a.heatmap[i].hours[h], 0)) }))
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-6">
-      <div className="w-full rounded-lg border border-brand-200 bg-brand-50/70 px-4 py-2 text-center text-xs font-semibold tracking-wide text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+    <div className="dashboard max-w-[1452px] mx-auto space-y-6">
+      <div className="dashboard-evidence w-full rounded-lg border border-brand-200 bg-brand-50/70 px-4 py-2 text-center text-xs font-semibold text-brand-600 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
         All Metrics Use Recorded Executions &amp; Peer Audits
       </div>
       {/* Header */}
-      <div className="flex items-end justify-between flex-wrap gap-4">
+      <div className="dashboard-heading flex items-end justify-between flex-wrap gap-4">
         <div>
-          <h1 className="font-sora text-2xl font-bold text-slate-900 dark:text-slate-100">Reputation Overview</h1>
+          <span className="dashboard-eyebrow">Fleet intelligence</span>
+          <h1 className="text-[26px] font-bold text-slate-900 dark:text-slate-100">Reputation Overview</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             Recorded task and peer-review metrics across {agents.length} configured agents.
           </p>
         </div>
-        <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-1">
+        <div className="dashboard-period flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-1">
           {['24h', '7d', '30d'].map((r) => (
             <button
               key={r}
               onClick={() => setTimeRange(r)}
+              aria-pressed={timeRange === r}
               className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
                 timeRange === r ? 'bg-brand-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
@@ -69,7 +71,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="dashboard-kpis grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KpiCard
           title="Avg Trust Score"
           value={display('trust')}
@@ -114,7 +116,7 @@ export default function Dashboard() {
       </div>
 
       {/* Fleet status strip */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="dashboard-status grid grid-cols-2 md:grid-cols-4 gap-4">
         {Object.entries(STATUS_META).map(([key, meta]) => {
           const count = key === 'active' ? stats.active : key === 'degraded' ? stats.degraded : key === 'stalled' ? stats.stalled : agents.filter((a) => a.status === 'idle').length
           return (
@@ -130,10 +132,11 @@ export default function Dashboard() {
       </div>
 
       {/* Protocol pulse */}
-      <div className="rounded-2xl bg-gradient-to-br from-slate-950 via-brand-950 to-brand-900 p-5 text-white shadow-lg shadow-brand-900/10">
+      <div className="dashboard-pulse rounded-2xl bg-gradient-to-br from-[#071e30] via-[#0c3c56] to-[#096b8b] p-5 text-white shadow-lg shadow-brand-900/10">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold"><Activity size={15} className="text-cyan-300" /> Protocol pulse</div>
+            <span className="dashboard-eyebrow">The evidence layer</span>
+            <h2 className="flex items-center gap-2 text-sm font-semibold"><Activity size={20} className="text-cyan-300" /> Protocol pulse</h2>
             <p className="mt-1 text-xs text-slate-300">A live view of the evidence powering agent reputation.</p>
           </div>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-300">
@@ -150,17 +153,19 @@ export default function Dashboard() {
 
       {/* Network + heatmap */}
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-        <div className="xl:col-span-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Swarm topology & peer audits</h3>
+        <div className="dashboard-panel dashboard-network xl:col-span-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+          <div className="dashboard-panel-heading flex items-center justify-between mb-3">
+            <div><span className="dashboard-eyebrow">Connected intelligence</span><h2>Swarm topology &amp; peer audits</h2></div>
             <Link to="/app/swarms" className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 inline-flex items-center gap-1">
               Explore swarms <ArrowRight size={12} />
             </Link>
           </div>
-          <NetworkGraph height={420} />
+          <p className="dashboard-description">Explore agents and the recorded peer audits connecting them.</p>
+          <div className="dashboard-canvas"><NetworkGraph height={420} /></div>
         </div>
         <div className="xl:col-span-2 space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+          <div className="dashboard-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+            <span className="dashboard-eyebrow">Execution rhythm</span>
             <Heatmap data={heatmap} title="Fleet activity — 7 days × 24h" />
           </div>
         </div>
@@ -168,14 +173,16 @@ export default function Dashboard() {
 
       {/* Bottom row: distribution + top agents */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Trust distribution</h3>
+        <div className="dashboard-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+          <span className="dashboard-eyebrow">Reputation signals</span>
+          <h2>Trust distribution</h2>
+          <p className="dashboard-description">How trust scores are distributed across the fleet.</p>
           <TrustDistributionChart agents={agents} />
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Top trusted agents</h3>
+        <div className="dashboard-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+          <div className="dashboard-panel-heading flex items-center justify-between mb-3">
+            <div><span className="dashboard-eyebrow">Fleet leaders</span><h2>Top trusted agents</h2></div>
             <Link to="/app/marketplace" className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 inline-flex items-center gap-1">
               Marketplace <ArrowRight size={12} />
             </Link>
@@ -185,7 +192,7 @@ export default function Dashboard() {
               <Link
                 key={a.id}
                 to={`/app/agents/${a.id}`}
-                className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                className="dashboard-agent flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold" style={{ background: a.stage.color }}>
                   {i + 1}
@@ -207,10 +214,10 @@ export default function Dashboard() {
 
       </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+      <div className="dashboard-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
         <div className="flex items-center gap-2 mb-3">
           <AlertTriangle size={15} className="text-amber-500" />
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Needs attention</h3>
+          <h2>Needs attention</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <AttentionItem label="Building evidence" value={agents.filter((a) => a.auditsReceived + a.tasksCompleted < 10).length} detail="Agents with limited history" />
@@ -224,9 +231,9 @@ export default function Dashboard() {
 }
 
 function PulseMetric({ label, value }) {
-  return <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5"><div className="text-lg font-bold tabular-nums">{value.toLocaleString()}</div><div className="text-[10px] text-slate-300">{label}</div></div>
+  return <div className="dashboard-pulse-metric rounded-xl border border-white/10 bg-white/5 px-3 py-2.5"><div className="text-lg font-bold tabular-nums">{value.toLocaleString()}</div><div className="text-[10px] text-slate-300">{label}</div></div>
 }
 
 function AttentionItem({ label, value, detail }) {
-  return <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5"><div className="flex items-center justify-between"><span className="text-xs font-semibold">{label}</span><span className="text-lg font-bold tabular-nums text-slate-900 dark:text-slate-100">{value}</span></div><div className="text-[10px] text-slate-400 dark:text-slate-500">{detail}</div></div>
+  return <div className="dashboard-attention-item rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5"><div className="flex items-center justify-between"><span className="text-xs font-semibold">{label}</span><span className="text-lg font-bold tabular-nums text-slate-900 dark:text-slate-100">{value}</span></div><div className="text-[10px] text-slate-400 dark:text-slate-500">{detail}</div></div>
 }

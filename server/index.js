@@ -1,9 +1,10 @@
 import './env.js'
 import { db } from './db.js'
 import { startBackupScheduler } from './backups.js'
-import { authenticate, createSession, logout, protectMutation, requireAdmin, resolveIdentity } from './auth.js'
+import { authenticate, createSession, logout, protectMutation, requireAdmin, resolveIdentity, walletLoginChallenge } from './auth.js'
 import { requestContext, rateLimit, usageFor } from './limits.js'
-import { walletStatus, walletChallenge, verifyWallet, requireOwnedWallet } from './wallet-auth.js'
+import { walletStatus, requireOwnedWallet } from './wallet-auth.js'
+import { readWalletTransactions } from './wallet-transactions.js'
 import { idempotency } from './idempotency.js'
 import { parseEther } from 'viem'
 import { resolve } from 'node:path'
@@ -41,8 +42,9 @@ import { runSwarmAnalysis, recentSwarmRuns } from './swarm.js'
 import { store, nextId, warmup, loadStore, saveStore, getAgent, getAllAgents } from './store.js'
 import { buildAllAgents, buildAgent, buildSwarm, SWARMS, buildAuditEvent } from './metrics.js'
 import { runAgent, auditOutput, MODE, MODEL, requireRuntime, runtimeStatus, updateRuntime, checkRuntime, runtimeProvenance } from './runtime.js'
-import { verifyMint, metadataHashOf, AGENT_FACTORY_ADDRESS, TASK_ESCROW_ADDRESS, TREASURY_ADDRESS } from './chain.js'
+import { verifyMint, metadataHashOf, AGENT_FACTORY_ADDRESS, TASK_ESCROW_ADDRESS, TREASURY_ADDRESS, PLATFORM_OWNER_ADDRESS, factoryReadiness } from './chain.js'
 import { verifyCreateTask, verifyCompleteTask, readTreasuryStats } from './chain.js'
+import { escrowReadiness, requireEscrowReady, isV2Escrow, escrowAddressOf, attestDelivery, holdEscrowRevision, verifyEscrowDispute, verifyEscrowResolution, syncEscrowTask, startEscrowScheduler } from './escrow.js'
 import {
   runFeedCycle,
   startFeedScheduler,
@@ -130,7 +132,7 @@ app.get('/api/health', (req, res) => {
     mode: MODE,
     model: MODEL,
     configured: MODE !== 'unconfigured',
-    authConfigured: !!(process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID)?.endsWith('.apps.googleusercontent.com'),
+    authConfigured: true,
     dataSource: 'recorded-provider-activity',
     agents: getAllAgents().length,
     executions: store.executions.length,
@@ -139,6 +141,7 @@ app.get('/api/health', (req, res) => {
   })
 })
 
+app.post('/api/auth/challenge', walletLoginChallenge)
 app.post('/api/auth/session', async (req, res) => {
   const user = await createSession(req, res)
   if (!user) return
@@ -147,17 +150,19 @@ app.post('/api/auth/session', async (req, res) => {
 })
 app.post('/api/auth/logout', logout)
 app.use('/api', authenticate, rateLimit)
-app.use('/api', (req, res, next) => requestContext.run({ ownerId: req.user.email, runtime: { source: MODE, model: MODEL } }, next))
+app.use('/api', (req, res, next) => requestContext.run({ ownerId: req.user.walletAddress, runtime: { source: MODE, model: MODEL } }, next))
 app.use('/api', idempotency)
 app.use('/api', (req, res, next) => {
-  if (req.method === 'POST' && /^\/(tasks(?:\/hire|\/[^/]+\/(?:audit|retry))?|swarms\/analyze|feed\/cycle|feed\/posts\/[^/]+\/regenerate|runtime\/check)$/.test(req.path) && !usageFor(req.user.email).remaining) return res.status(429).json({ error: 'Daily AI call limit reached. Try again after midnight UTC.' })
+  if (req.method === 'POST' && /^\/(tasks(?:\/hire|\/[^/]+\/(?:audit|retry))?|swarms\/analyze|feed\/cycle|feed\/posts\/[^/]+\/regenerate|runtime\/check)$/.test(req.path) && !usageFor(req.user.walletAddress).remaining) return res.status(429).json({ error: 'Daily AI call limit reached. Try again after midnight UTC.' })
   next()
 })
 app.get('/api/auth/me', (req, res) => res.json({ user: req.user }))
-app.get('/api/usage', (req, res) => res.json({ usage: usageFor(req.user.email) }))
+app.get('/api/usage', (req, res) => res.json({ usage: usageFor(req.user.walletAddress) }))
 app.get('/api/wallet', walletStatus)
-app.post('/api/wallet/challenge', walletChallenge)
-app.post('/api/wallet/verify', verifyWallet)
+app.get('/api/wallet/transactions', async (req, res) => {
+  if (typeof req.query.walletAddress !== 'string' || req.query.walletAddress.toLowerCase() !== req.user.walletAddress) return res.status(403).json({ error: 'Sign in with the connected wallet to view its transactions.' })
+  res.json(await readWalletTransactions(req.user.walletAddress, req.query.beforeBlock))
+})
 app.get('/api/runtime', (req, res) => res.json({ runtime: runtimeStatus() }))
 app.put('/api/runtime', requireAdmin, (req, res) => {
   const runtime = updateRuntime(req.body)
@@ -167,7 +172,8 @@ app.put('/api/runtime', requireAdmin, (req, res) => {
 app.post('/api/runtime/check', requireAdmin, async (req, res) => res.json({ check: await checkRuntime() }))
 
 // Chain config for the frontend wallet flow (PRD §4.3)
-app.get('/api/chain', (req, res) => {
+app.get('/api/chain', async (req, res) => {
+  const [escrow, factory] = await Promise.all([escrowReadiness(), factoryReadiness()])
   res.json({
     chainId: 84532,
     chainName: 'Base Sepolia',
@@ -175,9 +181,16 @@ app.get('/api/chain', (req, res) => {
     agentFactory: AGENT_FACTORY_ADDRESS,
     taskEscrow: TASK_ESCROW_ADDRESS,
     treasury: TREASURY_ADDRESS,
-    operator: process.env.OPERATOR_ADDRESS || '0x26839094202c7582DE5279eB61239B55C481Fe2d',
+    operator: PLATFORM_OWNER_ADDRESS,
     mintFeeEth: '0.001',
     deployed: !!AGENT_FACTORY_ADDRESS,
+    factoryReady: factory.ready,
+    factoryError: factory.error || null,
+    escrowReady: escrow.ready,
+    escrowError: escrow.error || null,
+    escrowVersion: escrow.version,
+    deliveryOperator: escrow.operator || null,
+    reviewWindowHours: escrow.reviewWindowHours || null,
   })
 })
 
@@ -192,8 +205,18 @@ app.get('/api/agents/:id', (req, res) => {
 })
 
 // Reputation protocol config — weights + hire threshold
+function publicConfig() {
+  const { trust, completion, latency, social } = store.config.reputation
+  return {
+    reputation: { trust, completion, latency, social },
+    hireThreshold: store.config.hireThreshold,
+    fleetLimit: store.config.fleetLimit,
+    explorationRate: store.config.explorationRate,
+  }
+}
+
 app.get('/api/config', (req, res) => {
-  res.json({ config: store.config })
+  res.json({ config: publicConfig() })
 })
 
 app.put('/api/config', requireAdmin, (req, res) => {
@@ -220,7 +243,56 @@ app.put('/api/config', requireAdmin, (req, res) => {
   }
   saveStore()
   broadcast({ type: 'update', resource: 'config' })
-  res.json({ config: store.config })
+  res.json({ config: publicConfig() })
+})
+
+// Private records are scoped to the authenticated owner, never a query parameter.
+app.get('/api/outcomes', (req, res) => {
+  const outcomes = (store.config.customerOutcomes || [])
+    .filter((item) => item.ownerId === req.user.walletAddress)
+    .sort((a, b) => b.ts - a.ts)
+  res.json({ outcomes })
+})
+
+app.get('/api/outcomes/:id', (req, res) => {
+  const outcome = (store.config.customerOutcomes || [])
+    .find((item) => item.id === req.params.id && item.ownerId === req.user.walletAddress)
+  if (!outcome) return res.status(404).json({ error: 'Outcome not found' })
+  res.json({ outcome })
+})
+
+app.get('/api/disputes', (req, res) => {
+  const disputes = (store.config.disputes || [])
+    .filter((item) => item.ownerId === req.user.walletAddress)
+    .sort((a, b) => b.createdAt - a.createdAt)
+  res.json({ disputes })
+})
+
+app.get('/api/disputes/:id', (req, res) => {
+  const dispute = (store.config.disputes || [])
+    .find((item) => item.id === req.params.id && item.ownerId === req.user.walletAddress)
+  if (!dispute) return res.status(404).json({ error: 'Dispute not found' })
+  res.json({ dispute })
+})
+
+// Administrators use explicit management routes to access other owners' disputes.
+function managementDispute(dispute) {
+  const task = store.tasks.find(item => item.id === dispute.taskId)
+  return { ...dispute, escrow: task?.escrowTaskId ? {
+    taskId: task.escrowTaskId, address: escrowAddressOf(task), version: task.escrowVersion || 1,
+    consumer: task.consumer, status: task.status,
+  } : null }
+}
+app.get('/api/admin/disputes', requireAdmin, (req, res) => {
+  const disputes = [...(store.config.disputes || [])].sort((a, b) => b.createdAt - a.createdAt).map(managementDispute)
+  res.json({ disputes })
+})
+
+app.get('/api/admin/disputes/:id', requireAdmin, (req, res) => {
+  const dispute = (store.config.disputes || []).find((item) => item.id === req.params.id)
+  if (!dispute) return res.status(404).json({ error: 'Dispute not found' })
+  if (['upheld', 'rejected'].includes(dispute.status) && dispute.decision === req.body?.decision && dispute.resolutionTxHash === req.body?.txHash) return res.json({ dispute })
+  res.json({ dispute: managementDispute(dispute) })
 })
 
 app.get('/api/swarms', (req, res) => {
@@ -241,7 +313,7 @@ app.post('/api/swarms/analyze', async (req, res) => {
     return res.status(400).json({ error: 'task must be 500 characters or fewer' })
   }
   try {
-    const run = await runSwarmAnalysis({ task: task.trim(), agentIds, count, ownerId: req.user.email })
+    const run = await runSwarmAnalysis({ task: task.trim(), agentIds, count, ownerId: req.user.walletAddress })
     broadcast({ type: 'update', resource: 'all' })
     res.json({ run })
   } catch (e) {
@@ -251,25 +323,23 @@ app.post('/api/swarms/analyze', async (req, res) => {
 })
 
 app.get('/api/swarms/runs', (req, res) => {
-  res.json({ runs: recentSwarmRuns(20, req.user.email) })
+  res.json({ runs: recentSwarmRuns(20, req.user.walletAddress) })
 })
 
 // ---------------------------------------------------------------------------
 // User profile (PRD §4.1): wallet address + owned agent ids, persisted to SQLite.
-// The client sends the Google identity; the server upserts and returns the row.
+// The authenticated wallet address is the stable user identity.
 // ---------------------------------------------------------------------------
-function upsertProfile({ email, name, picture, walletAddress }) {
-  if (!email || typeof email !== 'string') return null
-  const existing = store.users.find((u) => u.id === email)
-  const now = Date.now()
+function upsertProfile({ name, walletAddress }) {
+  const id = walletAddress?.toLowerCase()
+  if (!/^0x[0-9a-f]{40}$/.test(id || '')) return null
+  const existing = store.users.find((u) => u.id === id)
   const user = {
-    id: email,
-    name: typeof name === 'string' && name ? name : existing?.name || email.split('@')[0],
-    email,
-    picture: typeof picture === 'string' ? picture : existing?.picture || null,
-    walletAddress:
-      walletAddress === null || walletAddress === '' ? null : typeof walletAddress === 'string' ? walletAddress : existing?.walletAddress || null,
-    created_at: existing?.created_at || now,
+    id,
+    name: typeof name === 'string' && name ? name : existing?.name || `Wallet ${id.slice(0, 6)}…${id.slice(-4)}`,
+    picture: '',
+    walletAddress: id,
+    created_at: existing?.created_at || Date.now(),
   }
   if (!existing) store.users.push(user)
   else Object.assign(existing, user)
@@ -278,22 +348,17 @@ function upsertProfile({ email, name, picture, walletAddress }) {
 }
 
 app.get('/api/profile', (req, res) => {
-  const email = req.user.email
-  if (!email) return res.status(400).json({ error: 'email query param is required' })
-  const user = store.users.find((u) => u.id === email)
-  if (!user) return res.status(404).json({ error: 'Profile not found' })
-  // Owned agents: custom agents minted by this user (PRD §4.1)
-  const ownedAgentIds = store.agents.filter((a) => a.ownerId === email).map((a) => a.id)
+  const id = req.user.walletAddress
+  const user = store.users.find((u) => u.id === id) || upsertProfile(req.user)
+  const ownedAgentIds = store.agents.filter((a) => a.ownerId === id).map((a) => a.id)
   res.json({ profile: { ...user, ownedAgentIds } })
 })
 
 app.put('/api/profile', (req, res) => {
-  const { email, name, picture } = req.user
-  const { walletAddress } = req.body || {}
-  if (walletAddress && (typeof walletAddress !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(walletAddress))) return res.status(400).json({ error: 'Invalid wallet address' })
-  const user = upsertProfile({ email, name, picture, walletAddress })
-  if (!user) return res.status(400).json({ error: 'email is required' })
-  const ownedAgentIds = store.agents.filter((a) => a.ownerId === email).map((a) => a.id)
+  const requestedWallet = req.body?.walletAddress
+  if (requestedWallet && (typeof requestedWallet !== 'string' || requestedWallet.toLowerCase() !== req.user.walletAddress)) return res.status(400).json({ error: 'Sign in with a different wallet to switch accounts.' })
+  const user = upsertProfile(req.user)
+  const ownedAgentIds = store.agents.filter((a) => a.ownerId === req.user.walletAddress).map((a) => a.id)
   res.json({ profile: { ...user, ownedAgentIds } })
 })
 
@@ -306,7 +371,7 @@ const SPECIALTIES = ['Content Writer', 'Researcher', 'Coder', 'Designer', 'Data 
 
 app.post('/api/agents/custom', requireOwnedWallet, async (req, res) => {
   const { txHash, walletAddress, name, personaPrompt, specialty } = req.body || {}
-  const email = req.user.email
+  const ownerId = req.user.walletAddress
 
   // --- validate input ---
   if (!name || typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 40) {
@@ -323,7 +388,7 @@ app.post('/api/agents/custom', requireOwnedWallet, async (req, res) => {
   }
   if (!txHash) return res.status(400).json({ error: 'txHash is required' })
   const fleetLimit = Math.max(1, Number(store.config.fleetLimit) || 5)
-  if (store.agents.filter((a) => a.ownerId === email).length >= fleetLimit) {
+  if (store.agents.filter((a) => a.ownerId === ownerId).length >= fleetLimit) {
     return res.status(403).json({ error: `Provider fleet limit reached (${fleetLimit} agents). Build provider reputation to request a higher limit.` })
   }
 
@@ -349,7 +414,7 @@ app.post('/api/agents/custom', requireOwnedWallet, async (req, res) => {
     price: 0.1,
     pricePerTask: 0.1,
     persona: personaPrompt.trim(),
-    ownerId: email || null,
+    ownerId,
     walletAddress,
     mintTxHash: txHash,
     tokenId: verified.tokenId != null ? String(verified.tokenId) : null,
@@ -359,7 +424,7 @@ app.post('/api/agents/custom', requireOwnedWallet, async (req, res) => {
   saveStore()
 
   // Link the agent to the owner's profile
-  if (email) upsertProfile({ email, walletAddress })
+  upsertProfile({ walletAddress })
 
   broadcast({ type: 'update', resource: 'agents' })
   res.status(201).json({ agent: buildAgent(agent), verified: { tokenId: String(verified.tokenId) }, mode: MODE })
@@ -418,7 +483,7 @@ app.get('/api/feed', (req, res) => {
 
 // Pending posts for the signed-in user's agents (approval gate)
 app.get('/api/feed/pending', (req, res) => {
-  const owned = store.agents.filter((a) => a.ownerId === req.user.email).map((a) => a.id)
+  const owned = store.agents.filter((a) => a.ownerId === req.user.walletAddress).map((a) => a.id)
   const pending = store.feedPosts
     .filter((p) => p.status === 'pending' && owned.includes(p.agentId))
     .sort((a, b) => b.ts - a.ts)
@@ -430,7 +495,7 @@ app.get('/api/feed/pending', (req, res) => {
 app.post('/api/feed/posts/:id/approve', (req, res) => {
   const post = store.feedPosts.find((p) => p.id === req.params.id)
   if (!post) return res.status(404).json({ error: 'Post not found' })
-  if (getAgent(post.agentId)?.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the agent owner can edit this post' })
+  if (getAgent(post.agentId)?.ownerId !== req.user.walletAddress) return res.status(403).json({ error: 'Only the agent owner can edit this post' })
   if (post.status !== 'pending') return res.status(400).json({ error: 'Post is not pending' })
   post.status = 'live'
   saveStore()
@@ -442,7 +507,7 @@ app.post('/api/feed/posts/:id/approve', (req, res) => {
 app.post('/api/feed/posts/:id/regenerate', async (req, res) => {
   const post = store.feedPosts.find((p) => p.id === req.params.id)
   if (!post) return res.status(404).json({ error: 'Post not found' })
-  if (getAgent(post.agentId)?.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the agent owner can edit this post' })
+  if (getAgent(post.agentId)?.ownerId !== req.user.walletAddress) return res.status(403).json({ error: 'Only the agent owner can edit this post' })
   if (post.status !== 'pending') return res.status(400).json({ error: 'Only pending posts can be regenerated' })
   const agent = getAgent(post.agentId)
   if (!agent) return res.status(404).json({ error: 'Agent not found' })
@@ -477,7 +542,7 @@ app.post('/api/feed/focus', (req, res) => {
   const { agentId, focus } = req.body || {}
   const agent = getAgent(agentId)
   if (!agent) return res.status(404).json({ error: 'Agent not found' })
-  if (agent.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the agent owner can set focus' })
+  if (agent.ownerId !== req.user.walletAddress) return res.status(403).json({ error: 'Only the agent owner can set focus' })
   store.config.feedFocus = store.config.feedFocus || {}
   store.config.feedFocus[agentId] =
     typeof focus === 'string' && focus.trim() ? focus.trim().slice(0, 200) : null
@@ -489,7 +554,7 @@ app.post('/api/feed/focus', (req, res) => {
 app.post('/api/feed/agents/:id/generate', async (req, res) => {
   const agent = getAgent(req.params.id)
   if (!agent) return res.status(404).json({ error: 'Agent not found' })
-  if (agent.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the agent owner can generate this post' })
+  if (agent.ownerId !== req.user.walletAddress) return res.status(403).json({ error: 'Only the agent owner can generate this post' })
   if (store.feedPosts.some((post) => post.agentId === agent.id && post.status === 'pending')) {
     return res.status(409).json({ error: 'This agent already has a pending post. Approve or regenerate it first.' })
   }
@@ -541,7 +606,7 @@ app.post('/api/tasks', async (req, res) => {
   requireRuntime()
   const taskRecord = {
     id: nextId('tk'), task: task.trim(), agentId: agent.id,
-    status: 'running', ownerId: req.user.email, executionId: null, ts: Date.now(),
+    status: 'running', ownerId: req.user.walletAddress, executionId: null, ts: Date.now(),
   }
   store.tasks.push(taskRecord)
   saveStore()
@@ -578,16 +643,24 @@ app.post('/api/tasks', async (req, res) => {
 })
 
 app.post('/api/tasks/:id/retry', async (req, res) => {
-  const task = store.tasks.find((t) => t.id === req.params.id && t.ownerId === req.user.email)
+  const task = store.tasks.find((t) => t.id === req.params.id && t.ownerId === req.user.walletAddress)
   if (!task) return res.status(404).json({ error: 'Task not found' })
-  if (task.status !== 'failed') return res.status(409).json({ error: 'Only failed tasks can be retried.' })
+  if (!['failed', 'revision_interrupted', 'revision_hold_interrupted'].includes(task.status)) return res.status(409).json({ error: 'Only failed or interrupted tasks can be retried.' })
   const agent = getAgent(task.agentId)
   if (!agent) return res.status(404).json({ error: 'Task agent no longer exists' })
   requireRuntime()
+  if (task.status === 'revision_hold_interrupted') {
+    task.status = 'revision_hold_pending'
+    saveStore()
+    try { await holdEscrowRevision(task) }
+    catch (error) { task.status = 'revision_hold_interrupted'; saveStore(); throw error }
+    task.revisionCount = (task.revisionCount || 0) + 1
+  }
   task.status = 'running'
   saveStore()
-  const result = await runAgent(agent, task.task)
-  const execution = { id: nextId('ex'), agentId: agent.id, task: task.task, output: result.output, success: result.success, latencyMs: result.latencyMs, source: result.source, model: result.model, ts: Date.now() }
+  const prompt = task.revisionRequest ? `${task.task}\n\nCustomer revision request:\n${task.revisionRequest}` : task.task
+  const result = await runAgent(agent, prompt)
+  const execution = { id: nextId('ex'), agentId: agent.id, task: task.task, output: result.output, success: result.success, latencyMs: result.latencyMs, source: result.source, model: result.model, ts: Date.now(), ...(task.revisionRequest ? { revision: task.revisionCount } : {}) }
   store.executions.push(execution)
   Object.assign(task, { status: result.success ? 'completed' : 'failed', executionId: execution.id, source: result.source, model: result.model })
   if (result.success) {
@@ -595,6 +668,7 @@ app.post('/api/tasks/:id/retry', async (req, res) => {
     task.revisionRequest = null
   }
   saveStore()
+  if (result.success) await attestDelivery(task)
   broadcast({ type: 'update', resource: 'all' })
   res.json({ task, execution: { ...execution, agent: buildAgent(agent) }, routedTo: buildAgent(agent), mode: MODE })
 })
@@ -604,7 +678,7 @@ const auditingTasks = new Set()
 app.post('/api/tasks/:id/audit', async (req, res) => {
   const task = store.tasks.find((t) => t.id === req.params.id)
   if (!task) return res.status(404).json({ error: 'Task not found' })
-  if (task.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the task owner can request an audit' })
+  if (task.ownerId !== req.user.walletAddress) return res.status(403).json({ error: 'Only the task owner can request an audit' })
   if (task.status !== 'completed' && task.status !== 'paid') return res.status(400).json({ error: 'Only successful tasks can be audited' })
   const execution = store.executions.find((e) => e.id === task.executionId)
   if (!execution) return res.status(404).json({ error: 'Execution not found' })
@@ -650,13 +724,18 @@ app.post('/api/tasks/:id/audit', async (req, res) => {
 app.post('/api/tasks/:id/outcome', (req, res) => {
   const task = store.tasks.find((item) => item.id === req.params.id)
   if (!task) return res.status(404).json({ error: 'Task not found' })
-  if (task.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the task owner can submit an outcome' })
+  if (task.ownerId !== req.user.walletAddress) return res.status(403).json({ error: 'Only the task owner can submit an outcome' })
   if (task.escrowTaskId) return res.status(409).json({ error: 'Approve an escrow task by releasing its payment.' })
-  if (expireReview(task)) return res.status(409).json({ error: 'The review window has expired.' })
   const outcome = String(req.body?.outcome || '')
   if (!['accepted'].includes(outcome)) {
     return res.status(400).json({ error: 'Use the revision or dispute action for work you do not accept.' })
   }
+  if (task.status === 'approved') {
+    const previous = (store.config.customerOutcomes || []).find(item => item.taskId === task.id && item.ownerId === req.user.walletAddress && item.outcome === 'accepted')
+    if (previous) return res.json({ outcome: previous })
+  }
+  if (expireReview(task)) return res.status(409).json({ error: 'The review window has expired.' })
+  if (task.status !== 'completed') return res.status(409).json({ error: 'Only successfully completed tasks can be accepted.' })
   const quality = { accepted: 100, revision_requested: 55, rejected: 0 }[outcome]
   const record = { id: nextId('out'), taskId: task.id, agentId: task.agentId, ownerId: task.ownerId, outcome, quality, note: String(req.body?.note || '').slice(0, 500), ts: Date.now() }
   store.config.customerOutcomes = (store.config.customerOutcomes || []).filter((item) => item.taskId !== task.id)
@@ -670,7 +749,7 @@ app.post('/api/tasks/:id/outcome', (req, res) => {
 app.post('/api/tasks/:id/revision', async (req, res) => {
   const task = store.tasks.find((item) => item.id === req.params.id)
   if (!task) return res.status(404).json({ error: 'Task not found' })
-  if (task.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the task owner can request a revision' })
+  if (task.ownerId !== req.user.walletAddress) return res.status(403).json({ error: 'Only the task owner can request a revision' })
   if (expireReview(task)) return res.status(409).json({ error: 'The review window has expired.' })
   if (task.status !== 'completed') return res.status(409).json({ error: `Task cannot be revised from status ${task.status}` })
   if ((task.revisionCount || 0) >= MAX_REVISIONS) return res.status(409).json({ error: `Maximum revisions reached (${MAX_REVISIONS}). Open a dispute for independent review.` })
@@ -679,6 +758,13 @@ app.post('/api/tasks/:id/revision', async (req, res) => {
   const agent = getAgent(task.agentId)
   if (!agent) return res.status(404).json({ error: 'Task agent no longer exists' })
   requireRuntime()
+  if (isV2Escrow(task)) {
+    task.revisionRequest = request
+    task.status = 'revision_hold_pending'
+    saveStore()
+    try { await holdEscrowRevision(task) }
+    catch (error) { task.status = 'revision_hold_interrupted'; saveStore(); throw error }
+  }
   task.status = 'revision_requested'
   task.revisionRequest = request
   task.revisionCount = (task.revisionCount || 0) + 1
@@ -689,30 +775,24 @@ app.post('/api/tasks/:id/revision', async (req, res) => {
   Object.assign(task, { status: result.success ? 'completed' : 'failed', executionId: execution.id, source: result.source, model: result.model })
   if (result.success) task.reviewDeadlineAt = Date.now() + REVIEW_WINDOW_HOURS * 3600000
   saveStore()
+  if (result.success) await attestDelivery(task)
   broadcast({ type: 'update', resource: 'tasks' })
   res.status(201).json({ task, execution: { ...execution, agent: buildAgent(agent) }, reviewWindowHours: REVIEW_WINDOW_HOURS })
 })
 
-app.post('/api/tasks/:id/dispute', async (req, res) => {
-  const task = store.tasks.find((item) => item.id === req.params.id)
-  if (!task) return res.status(404).json({ error: 'Task not found' })
-  if (task.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the task owner can open a dispute' })
-  if (expireReview(task)) return res.status(409).json({ error: 'The review window has expired.' })
-  if (task.status !== 'completed') return res.status(409).json({ error: `Task cannot be disputed from status ${task.status}` })
-  const reason = String(req.body?.reason || '').trim()
-  if (reason.length < 10 || reason.length > 1000) return res.status(400).json({ error: 'dispute reason must be 10-1000 characters' })
-  const agent = getAgent(task.agentId)
-  const conflictFree = (candidate) => candidate.id !== task.agentId && !(agent?.ownerId && candidate.ownerId === agent.ownerId)
-  const reviewer = getAllAgents().find((candidate) => conflictFree(candidate) && candidate.stage.id === agent?.stage.id) ||
-    getAllAgents().find(conflictFree)
-  if (!reviewer) return res.status(503).json({ error: 'No independent reviewer is available' })
-  const dispute = { id: nextId('dis'), taskId: task.id, agentId: task.agentId, ownerId: task.ownerId, reason, reviewerId: reviewer.id, status: 'under_review', createdAt: Date.now(), resolvedAt: null }
-  store.config.disputes = store.config.disputes || []
-  store.config.disputes.push(dispute)
-  task.status = 'disputed'
+async function reviewDispute(dispute, task) {
+  dispute.reviewPending = true
+  dispute.status = 'under_review'
+  delete dispute.reviewError
   saveStore()
-  const execution = store.executions.find((item) => item.id === task.executionId)
   try {
+    const agent = getAgent(task.agentId)
+    const conflictFree = candidate => candidate.id !== task.agentId && !(agent?.ownerId && candidate.ownerId === agent.ownerId)
+    const previous = getAgent(dispute.reviewerId)
+    const reviewer = (previous && conflictFree(previous) ? previous : null) || getAllAgents().find(candidate => conflictFree(candidate) && candidate.stage.id === agent?.stage.id) || getAllAgents().find(conflictFree)
+    if (!reviewer) throw new Error('No independent reviewer is available')
+    dispute.reviewerId = reviewer.id
+    const execution = store.executions.find(item => item.id === task.executionId)
     const review = await auditOutput(reviewer, agent, task.task, execution?.output || '')
     dispute.review = { verdict: review.verdict, note: review.note, source: review.source, model: review.model, reviewerId: reviewer.id, ts: Date.now() }
     store.config.auditorCredits = store.config.auditorCredits || {}
@@ -720,25 +800,73 @@ app.post('/api/tasks/:id/dispute', async (req, res) => {
   } catch (error) {
     dispute.status = 'review_failed'
     dispute.reviewError = error.message
+  } finally {
+    dispute.reviewPending = false
+    saveStore()
+    broadcast({ type: 'update', resource: 'all' })
   }
+}
+
+app.post('/api/disputes/:id/retry-review', async (req, res) => {
+  const dispute = (store.config.disputes || []).find(item => item.id === req.params.id)
+  if (!dispute || (req.user.role !== 'admin' && dispute.ownerId !== req.user.walletAddress)) return res.status(404).json({ error: 'Dispute not found' })
+  if (dispute.status !== 'review_failed' || dispute.reviewPending) return res.status(409).json({ error: 'Only failed dispute reviews can be retried.' })
+  const task = store.tasks.find(item => item.id === dispute.taskId)
+  if (!task) return res.status(404).json({ error: 'Task not found' })
+  await reviewDispute(dispute, task)
+  res.json({ dispute })
+})
+
+app.post('/api/tasks/:id/dispute', async (req, res) => {
+  const task = store.tasks.find((item) => item.id === req.params.id)
+  if (!task) return res.status(404).json({ error: 'Task not found' })
+  if (task.ownerId !== req.user.walletAddress) return res.status(403).json({ error: 'Only the task owner can open a dispute' })
+  const reason = String(req.body?.reason || '').trim()
+  if (reason.length < 10 || reason.length > 1000) return res.status(400).json({ error: 'dispute reason must be 10-1000 characters' })
+  if (isV2Escrow(task)) {
+    const existing = (store.config.disputes || []).find(item => item.taskId === task.id)
+    if (existing) return res.json({ dispute: existing })
+    // A mined freeze is authoritative even if the API's clock/window expired
+    // while the consumer's transaction was confirming.
+    await verifyEscrowDispute(task, req.body?.txHash, reason)
+    const recorded = (store.config.disputes || []).find(item => item.taskId === task.id)
+    if (recorded) return res.json({ dispute: recorded })
+  } else {
+    if (task.escrowTaskId) return res.status(409).json({ error: 'This legacy escrow cannot freeze payments or refund a dispute. Contact the administrator.' })
+    expireReview(task)
+    if (!['completed', 'review_expired'].includes(task.status)) return res.status(409).json({ error: `Task cannot be disputed from status ${task.status}` })
+  }
+  const dispute = { id: nextId('dis'), taskId: task.id, agentId: task.agentId, ownerId: task.ownerId, reason, status: 'under_review', createdAt: Date.now(), resolvedAt: null }
+  if (isV2Escrow(task)) dispute.txHash = req.body.txHash
+  store.config.disputes = store.config.disputes || []
+  store.config.disputes.push(dispute)
+  task.status = 'disputed'
   saveStore()
-  broadcast({ type: 'update', resource: 'all' })
+  await reviewDispute(dispute, task)
   res.status(201).json({ dispute })
 })
 
-app.post('/api/disputes/:id/resolve', requireAdmin, (req, res) => {
+app.post('/api/disputes/:id/resolve', requireAdmin, async (req, res) => {
   const dispute = (store.config.disputes || []).find((item) => item.id === req.params.id)
   if (!dispute) return res.status(404).json({ error: 'Dispute not found' })
-  if (!['open', 'under_review'].includes(dispute.status)) return res.status(409).json({ error: 'Dispute already resolved' })
-  if (!dispute.review) return res.status(409).json({ error: 'Independent review is not available yet' })
+  if (!['open', 'under_review', 'review_failed'].includes(dispute.status)) return res.status(409).json({ error: 'Dispute already resolved' })
+  if (dispute.reviewPending) return res.status(409).json({ error: 'Independent review is still running.' })
+  const note = String(req.body?.note || '').trim().slice(0, 1000)
+  if (!dispute.review && (dispute.status !== 'review_failed' || note.length < 10)) return res.status(409).json({ error: 'Resolution without independent review requires a failed review and an explanation of at least 10 characters.' })
   const decision = String(req.body?.decision || '')
   if (!['uphold', 'reject'].includes(decision)) return res.status(400).json({ error: 'decision must be uphold or reject' })
+  const task = store.tasks.find((item) => item.id === dispute.taskId)
+  if (isV2Escrow(task || {})) {
+    await verifyEscrowResolution(task, req.body?.txHash, decision === 'uphold')
+    dispute.resolutionTxHash = req.body.txHash
+  } else if (task?.escrowTaskId) {
+    return res.status(409).json({ error: 'This legacy escrow has no on-chain dispute resolution.' })
+  }
   dispute.status = decision === 'uphold' ? 'upheld' : 'rejected'
   dispute.decision = decision
-  dispute.resolutionNote = String(req.body?.note || '').slice(0, 1000)
+  dispute.resolutionNote = note
   dispute.resolvedAt = Date.now()
-  const task = store.tasks.find((item) => item.id === dispute.taskId)
-  if (task) task.status = decision === 'uphold' ? 'dispute_upheld' : 'completed'
+  if (task && !isV2Escrow(task)) task.status = decision === 'uphold' ? 'dispute_upheld' : 'completed'
   saveStore()
   broadcast({ type: 'update', resource: 'all' })
   res.json({ dispute })
@@ -759,6 +887,9 @@ function reviewDeadline(task) {
 }
 
 function expireReview(task) {
+  // V2 settlement and dispute eligibility follow the chain deadline. Keep
+  // ledger verification available even after the automatic-release window.
+  if (isV2Escrow(task)) return false
   if (task.status === 'completed' && reviewDeadline(task)) {
     task.status = 'review_expired'
     saveStore()
@@ -782,6 +913,14 @@ app.post('/api/tasks/hire', requireOwnedWallet, async (req, res) => {
   }
   const agent = agentId ? getAgent(agentId) : null
   if (!agent) return res.status(404).json({ error: 'Agent not found' })
+  // Replay a verified hire after a lost API response without another execution.
+  const existing = store.tasks.find(item => typeof txHash === 'string' && item.txHash?.toLowerCase() === txHash.toLowerCase() && item.escrowTaskId)
+  if (existing) {
+    if (existing.ownerId !== req.user.walletAddress || existing.agentId !== agent.id || existing.task !== task.trim() || existing.amountEth !== Number(amountEth)) return res.status(409).json({ error: 'This payment is already registered to a different hire. Open Task Runner.' })
+    const execution = store.executions.find(item => item.id === existing.executionId)
+    const fee = existing.amountEth * FEE_BPS / 10000
+    return res.json({ task: existing, execution: execution || null, escrow: { taskId: existing.escrowTaskId, amountEth: existing.amountEth, feeEth: fee, payoutEth: existing.amountEth - fee, agentOwner: agentOwnerOf(agent), feeBps: FEE_BPS }, mode: MODE })
+  }
   const built = buildAgent(agent)
   if (!built.hireable) {
     return res.status(403).json({ error: `Agent not hireable — reputation ${built.reputationScore} < threshold ${store.config.hireThreshold}` })
@@ -797,28 +936,32 @@ app.post('/api/tasks/hire', requireOwnedWallet, async (req, res) => {
 
   const agentOwner = agentOwnerOf(agent)
   requireRuntime()
+  await requireEscrowReady()
   const amountWei = parseEther(String(amountEth))
 
   // --- verify the escrow lock on-chain (PRD §7) ---
   const verified = await verifyCreateTask(txHash, walletAddress, agentOwner, amountWei)
   if (!verified.ok) {
-    return res.status(400).json({ error: `on-chain escrow verification failed: ${verified.error}` })
+    return res.status(400).json({ error: `on-chain escrow verification failed: ${verified.error}`, transactionReverted: verified.reverted === true })
   }
 
-  if (store.tasks.some((t) => t.escrowTaskId === String(verified.taskId))) return res.status(409).json({ error: 'Escrow task already registered' })
+  if (store.tasks.some((t) => t.escrowTaskId === String(verified.taskId) && escrowAddressOf(t)?.toLowerCase() === TASK_ESCROW_ADDRESS.toLowerCase())) return res.status(409).json({ error: 'Escrow task already registered' })
   // --- persist the task (escrowed) ---
   const taskRecord = {
     id: nextId('tk'),
     task: task.trim(),
     agentId: agent.id,
     status: 'escrowed',
-    ownerId: req.user.email,
+    ownerId: req.user.walletAddress,
     executionId: null,
     ts: Date.now(),
     escrowTaskId: String(verified.taskId),
     consumer: walletAddress,
     amountEth: amount,
     txHash,
+    escrowAddress: TASK_ESCROW_ADDRESS,
+    escrowVersion: 2,
+    revisionCount: 0,
   }
   store.tasks.push(taskRecord)
   saveStore()
@@ -843,6 +986,7 @@ app.post('/api/tasks/hire', requireOwnedWallet, async (req, res) => {
   taskRecord.model = result.model
   taskRecord.status = result.success ? 'completed' : 'failed'
   saveStore()
+  if (result.success) await attestDelivery(taskRecord)
 
   broadcast({ type: 'update', resource: 'tasks' })
   const fee = amount * FEE_BPS / 10000
@@ -866,42 +1010,42 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
   const task = store.tasks.find((t) => t.id === req.params.id)
   if (!task) return res.status(404).json({ error: 'Task not found' })
   if (!task.escrowTaskId) return res.status(400).json({ error: 'Task has no escrow' })
-  if (task.ownerId !== req.user.email) return res.status(403).json({ error: 'Only the task owner can confirm' })
-  if (task.status === 'paid' || task.status === 'released') {
-    return res.status(400).json({ error: `Task already settled (${task.status})` })
-  }
-  if (expireReview(task)) return res.status(409).json({ error: 'The review window has expired. Open a dispute to request independent review.' })
-  if (task.status !== 'completed') {
-    return res.status(400).json({ error: `Task must be completed before confirming (status: ${task.status})` })
-  }
+  if (task.ownerId !== req.user.walletAddress) return res.status(403).json({ error: 'Only the task owner can confirm' })
   const { txHash } = req.body || {}
   if (!txHash) return res.status(400).json({ error: 'txHash is required' })
 
   // --- verify the payout on-chain (PRD §7) ---
-  const verified = await verifyCompleteTask(txHash, task.escrowTaskId)
+  const verified = await verifyCompleteTask(txHash, task.escrowTaskId, escrowAddressOf(task))
   if (!verified.ok) {
-    return res.status(400).json({ error: `on-chain payout verification failed: ${verified.error}` })
+    return res.status(400).json({ error: `on-chain payout verification failed: ${verified.error}`, transactionReverted: verified.reverted === true })
   }
 
   task.status = verified.released ? 'released' : 'paid'
   task.payoutEth = Number(verified.payout) / 1e18
   task.feeEth = Number(verified.fee) / 1e18
-  task.paidAt = Date.now()
+  task.paidAt ||= Date.now()
   saveStore()
 
   broadcast({ type: 'update', resource: 'tasks' })
-  const agent = getAgent(task.agentId)
-  if (!agent) return res.status(404).json({ error: 'Task agent no longer exists' })
   res.json({
     task,
-    payout: { payoutEth: task.payoutEth, feeEth: task.feeEth, agentOwner: agentOwnerOf(agent) },
+    payout: { payoutEth: task.payoutEth, feeEth: task.feeEth, agentOwner: verified.agentOwner },
     mode: MODE,
   })
 })
 
+app.post('/api/tasks/:id/sync', async (req, res) => {
+  const task = store.tasks.find(item => item.id === req.params.id && item.ownerId === req.user.walletAddress)
+  if (!task) return res.status(404).json({ error: 'Task not found' })
+  if (!isV2Escrow(task)) return res.status(409).json({ error: 'Synchronization requires a dispute-aware escrow task.' })
+  await syncEscrowTask(task)
+  broadcast({ type: 'update', resource: 'tasks' })
+  res.json({ task })
+})
+
 // Task ledger with escrow state (hiring history)
 app.get('/api/tasks', (req, res) => {
-  const list = store.tasks.filter((t) => t.ownerId === req.user.email)
+  const list = store.tasks.filter((t) => t.ownerId === req.user.walletAddress)
     .map((t) => { expireReview(t); return t })
     .sort((a, b) => b.ts - a.ts)
     .slice(0, 100)
@@ -910,7 +1054,7 @@ app.get('/api/tasks', (req, res) => {
 })
 
 app.get('/api/tasks/:id', (req, res) => {
-  const task = store.tasks.find((t) => t.id === req.params.id && t.ownerId === req.user.email)
+  const task = store.tasks.find((t) => t.id === req.params.id && t.ownerId === req.user.walletAddress)
   if (!task) return res.status(404).json({ error: 'Task not found' })
   expireReview(task)
   const agent = getAgent(task.agentId)
@@ -942,6 +1086,9 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(dist))
   app.get('/{*path}', (req, res) => res.sendFile(resolve(dist, 'index.html')))
 }
+let stopEscrow = async () => {}
+export const stopEscrowScheduler = () => stopEscrow()
+server.on('close', () => { stopEscrow() })
 export function startServer(port = PORT) {
   const hasData = loadStore()
   return server.listen(port, () => {
@@ -959,6 +1106,7 @@ export function startServer(port = PORT) {
   // Social feed (PRD §4.4): seed once so the timeline is alive, then schedule.
   // Scheduled cycles broadcast a `feed` update so connected clients refresh live.
   startFeedScheduler(() => broadcast({ type: 'update', resource: 'feed' }))
+  stopEscrow = startEscrowScheduler(() => broadcast({ type: 'update', resource: 'tasks' }))
   if (MODE !== 'unconfigured' && process.env.FEED_CYCLE_ENABLED === 'true') seedFeedIfEmpty()
     .then((r) => console.log(`[feed] seed: ${r.seeded ? `posted ${r.count} items` : r.reason}`))
     .catch((e) => console.error('[feed] seed failed:', e.message))
@@ -974,7 +1122,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     stopFeedScheduler()
     for (const socket of wss.clients) socket.terminate()
     wss.close()
-    server.close(async () => { await stopBackups(); process.exit(0) })
+    server.close(async () => { await stopEscrow(); await stopBackups(); process.exit(0) })
     setTimeout(() => process.exit(0), 15000).unref()
   }
   process.on('SIGTERM', shutdown)

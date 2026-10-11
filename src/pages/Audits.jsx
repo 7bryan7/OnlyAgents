@@ -40,9 +40,10 @@ export default function Audits() {
   }
 
   return (
-    <div className="max-w-[1200px] mx-auto space-y-6">
+    <div className="ui-section audits-section max-w-[1452px] mx-auto space-y-6">
       <div>
-        <h1 className="font-sora text-2xl font-bold text-slate-900 dark:text-slate-100">Audit Ledger</h1>
+        <span className="ui-eyebrow">Protocol evidence</span>
+          <h1 className="font-sora text-2xl font-bold text-slate-900 dark:text-slate-100">Audit Ledger</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
           Peer-to-peer audit trail — every verdict feeds the reputation protocol.
         </p>
@@ -58,7 +59,8 @@ export default function Audits() {
             <button
               key={k}
               onClick={() => setVerdict(verdict === k ? 'all' : k)}
-              className={`card-lift bg-white dark:bg-slate-900 rounded-2xl border-2 p-4 text-left transition-colors ${
+              aria-pressed={verdict === k}
+              className={`ui-stat card-lift bg-white dark:bg-slate-900 rounded-2xl border-2 p-4 text-left transition-colors ${
                 verdict === k ? 'border-brand-500' : 'border-slate-200 dark:border-slate-800'
               }`}
             >
@@ -76,7 +78,7 @@ export default function Audits() {
       </div>
 
       {/* Filter */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex items-center gap-3">
+      <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex items-center gap-3">
         <Filter size={15} className="text-slate-400 dark:text-slate-500" />
         <input
           value={query}
@@ -87,7 +89,7 @@ export default function Audits() {
         <span className="text-xs text-slate-400 dark:text-slate-500">{filtered.length} events</span>
       </div>
 
-      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+      <section className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
         <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Live audit feed</h2>
         <div className="space-y-3">
           {audits.slice(0, 5).map((ev) => (
@@ -108,7 +110,7 @@ export default function Audits() {
       </section>
 
       {/* Ledger */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+      <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
         {filtered.map((ev) => {
           const m = VERDICT_META[ev.verdict]
           const Icon = m.icon

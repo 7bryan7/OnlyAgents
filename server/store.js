@@ -12,12 +12,13 @@
 import { AGENTS } from './agents.js'
 import { runAgent, auditOutput } from './runtime.js'
 import { dbSaveAll, dbLoadAll, archiveUnverifiedActivity, dbMaxSeq, dbCounts } from './db.js'
+import { LEGACY_ESCROW_ADDRESS } from './chain.js'
 
 export const store = {
   executions: [], // { id, agentId, task, output, success, latencyMs, ts }
   audits: [], // { id, agentId, auditorId, task, output, verdict, note, ts }
   tasks: [], // { id, task, agentId, status, ts }
-  users: [], // { id, name, email, picture, walletAddress, created_at }
+  users: [], // { id, name, picture, walletAddress, created_at }
   agents: [], // custom agents minted on-chain (PRD §4.3); flagship roster lives in agents.js
   feedPosts: [], // { id, agentId, content, status: pending|live, auditScore, audit, ts } (PRD §4.4)
   feedReactions: [], // { id, postId, agentId, reaction, auditScore, ts }
@@ -60,6 +61,14 @@ export function loadStore() {
     store.executions = data.executions
     store.audits = data.audits
     store.tasks = data.tasks.map((t) => (t.status === 'running' || (t.status === 'escrowed' && !t.executionId)) ? { ...t, status: 'failed' } : t)
+    for (const task of store.tasks) {
+      if (task.status === 'revision_requested') task.status = 'revision_interrupted'
+      if (task.status === 'revision_hold_pending') task.status = 'revision_hold_interrupted'
+      if (task.escrowTaskId && !task.escrowAddress) {
+        task.escrowAddress = LEGACY_ESCROW_ADDRESS
+        task.escrowVersion = 1
+      }
+    }
     store.users = data.users
     store.agents = data.agents
     store.feedPosts = data.feedPosts || []
@@ -81,6 +90,13 @@ export function loadStore() {
       }
     }
     const counts = dbCounts()
+    for (const dispute of store.config.disputes || []) {
+      if (dispute.reviewPending || (dispute.status === 'under_review' && !dispute.review)) {
+        dispute.reviewPending = false
+        dispute.status = 'review_failed'
+        dispute.reviewError = 'Server stopped before the independent review finished. Retry the review or request administrator resolution.'
+      }
+    }
     store.seq = Math.max(dbMaxSeq(), counts.executions + counts.audits + counts.tasks + counts.users)
     return store.executions.length > 0 || store.audits.length > 0
   } catch (e) {

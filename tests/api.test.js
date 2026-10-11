@@ -8,11 +8,11 @@ import { installProviderFixture } from './provider-fixture.js'
 import { execFileSync } from 'node:child_process'
 import { fleetHistory, periodValue, periodChange } from '../src/fleetMetrics.js'
 import { privateKeyToAccount } from 'viem/accounts'
+import { seedSessions, sessionCookie, testWallets } from './session-fixture.js'
 
 const dir = mkdtempSync(join(tmpdir(), 'onlyagent-test-'))
 process.env.BACKUP_ENABLED = 'false'
-Object.assign(process.env, { DATA_DIR: dir, GEMINI_API_KEY: 'test-fixture-key', GOOGLE_CLIENT_ID: 'test-client', WARMUP_ENABLED: 'false', FEED_CYCLE_ENABLED: 'false' })
-process.env.ADMIN_EMAILS = 'test-user@example.test'
+Object.assign(process.env, { DATA_DIR: dir, GEMINI_API_KEY: 'test-fixture-key', WARMUP_ENABLED: 'false', FEED_CYCLE_ENABLED: 'false' })
 process.env.DAILY_AI_CALL_LIMIT = '1000'
 process.env.API_RATE_LIMIT = '5000'
 process.env.AUTH_RATE_LIMIT = '1000'
@@ -20,11 +20,12 @@ const fixture = installProviderFixture()
 const { startServer, wss } = await import('../server/index.js')
 const { store, saveStore, loadStore, nextId } = await import('../server/store.js')
 const { db, dbMaxSeq, archiveUnverifiedActivity } = await import('../server/db.js')
+seedSessions(db)
 const server = startServer(0)
 await new Promise((resolve) => server.once('listening', resolve))
 const base = `http://127.0.0.1:${server.address().port}`
 async function request(path, body, token = 'test-user', method) {
-  const res = await fetch(base + '/api' + path, { method: method || (body === undefined ? 'GET' : 'POST'), headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+  const res = await fetch(base + '/api' + path, { method: method || (body === undefined ? 'GET' : 'POST'), headers: { 'Content-Type': 'application/json', Cookie: sessionCookie(token), 'X-Requested-With': 'OnlyAgent' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   return { status: res.status, data: await res.json() }
 }
 after(async () => {
@@ -42,7 +43,7 @@ test('rejects unverified identity and exposes health without authentication', as
   assert.equal((await request('/agents', undefined, 'invalid')).status, 401)
   assert.equal((await request('/health', undefined, '')).data.ok, true)
   const me = await request('/auth/me')
-  assert.equal(me.data.user.email, 'test-user@example.test')
+  assert.equal(me.data.user.walletAddress, testWallets['test-user'])
 })
 
 test('empty database has 18 personas, no fabricated activity and zero evidence', async () => {
@@ -69,7 +70,7 @@ test('validates tasks and swarm selections before invoking the provider', async 
 })
 
 test('runs a task, pushes an update, audits once, and updates reputation', async () => {
-  const socket = new WebSocket(base.replace('http:', 'ws:') + '/ws', { headers: { Authorization: 'Bearer test-user' } })
+  const socket = new WebSocket(base.replace('http:', 'ws:') + '/ws', { headers: { Cookie: sessionCookie('test-user'), 'X-Requested-With': 'OnlyAgent' } })
   await new Promise((resolve) => socket.once('open', resolve))
   const update = new Promise((resolve) => socket.on('message', (raw) => { if (JSON.parse(raw).type === 'update') resolve() }))
   const run = await request('/tasks', { task: 'Draft a test plan', agentId: 'ag-103' })
@@ -123,8 +124,8 @@ test('swarm fan-out records all contributions, merges and persists the report', 
 
 test('SQLite retains custom agent metadata, feed audit axes, and payment fields on reload', () => {
   const ts = Date.now()
-  store.agents.push({ id: 'cu-10000', name: 'Persisted', role: 'Coder', specialty: 'Coder', gender: null, stage: { id: 'development' }, tags: [], price: 1, persona: 'Precise', description: '', ownerId: 'test-user@example.test', walletAddress: null, mintTxHash: '0xfixture', tokenId: '12', created_at: ts })
-  store.tasks.push({ id: 'tk-10001', task: 'Paid task fixture', agentId: 'cu-10000', status: 'paid', executionId: null, ts, escrowTaskId: '17', consumer: 'wallet-fixture', amountEth: 0.001, txHash: '0xpayment', payoutEth: 0.00093, feeEth: 0.00007, paidAt: ts, ownerId: 'test-user@example.test' })
+  store.agents.push({ id: 'cu-10000', name: 'Persisted', role: 'Coder', specialty: 'Coder', gender: null, stage: { id: 'development' }, tags: [], price: 1, persona: 'Precise', description: '', ownerId: testWallets['test-user'], walletAddress: null, mintTxHash: '0xfixture', tokenId: '12', created_at: ts })
+  store.tasks.push({ id: 'tk-10001', task: 'Paid task fixture', agentId: 'cu-10000', status: 'paid', executionId: null, ts, escrowTaskId: '17', consumer: 'wallet-fixture', amountEth: 0.001, txHash: '0xpayment', payoutEth: 0.00093, feeEth: 0.00007, paidAt: ts, ownerId: testWallets['test-user'] })
   store.feedPosts.push({ id: 'fp-10002', agentId: 'cu-10000', content: 'Test fixture post', status: 'pending', auditScore: 80, audit: { personality: 80, engagement: 80, relevance: 80 }, ts })
   saveStore()
   store.tasks = []
@@ -166,8 +167,8 @@ test('configuration validation is atomic and profile identity cannot be supplied
   assert.equal((await request('/config', { reputation: { trust: 'wrong' } }, 'test-user', 'PUT')).status, 400)
   assert.equal((await request('/config', { hireThreshold: -1 }, 'test-user', 'PUT')).status, 400)
   assert.deepEqual(store.config, before)
-  const profile = await request('/profile', { email: 'other-user@example.test', name: 'Impostor' }, 'test-user', 'PUT')
-  assert.equal(profile.data.profile.email, 'test-user@example.test')
+  const profile = await request('/profile', { email: testWallets['other-user'], name: 'Impostor' }, 'test-user', 'PUT')
+  assert.equal(profile.data.profile.walletAddress, testWallets['test-user'])
   assert.equal(profile.data.profile.name, 'Test User')
 })
 
@@ -199,7 +200,7 @@ test('feed generation persists validated provider scores and propagates failures
 })
 
 test('interrupted running tasks become failed after reloading durable state', () => {
-  const task = { id: nextId('tk'), task: 'Interrupted task', agentId: 'ag-101', status: 'running', ownerId: 'test-user@example.test', executionId: null, ts: Date.now() }
+  const task = { id: nextId('tk'), task: 'Interrupted task', agentId: 'ag-101', status: 'running', ownerId: testWallets['test-user'], executionId: null, ts: Date.now() }
   store.tasks.push(task)
   saveStore()
   loadStore()
@@ -222,21 +223,34 @@ test('provider provenance survives reload and unverified history is archived onc
 })
 
 test('cookie sessions are hashed, reject CSRF, survive reload and revoke on logout', async () => {
-  const login = await fetch(base + '/api/auth/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken: 'test-user' }) })
+  const account = privateKeyToAccount('0x' + '3'.repeat(64))
+  const challenge = await request('/auth/challenge', { walletAddress: account.address }, '')
+  const impostor = privateKeyToAccount('0x' + '4'.repeat(64))
+  const wrongSignature = await impostor.signMessage({ message: challenge.data.message })
+  assert.equal((await request('/auth/session', { walletAddress: account.address, signature: wrongSignature }, '')).status, 403)
+  const signature = await account.signMessage({ message: challenge.data.message })
+  const login = await fetch(base + '/api/auth/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ walletAddress: account.address, signature }) })
   assert.equal(login.status, 200)
   const setCookie = login.headers.get('set-cookie')
   assert.match(setCookie, /HttpOnly/)
   const cookie = setCookie.split(';')[0]
   assert.ok(!db.prepare('SELECT hash FROM sessions').all().some((s) => s.hash === cookie.split('=')[1]))
   const me = await fetch(base + '/api/auth/me', { headers: { Cookie: cookie } })
-  assert.equal((await me.json()).user.role, 'admin')
+  const identity = (await me.json()).user
+  assert.equal(identity.role, 'user')
+  assert.equal(identity.walletAddress, account.address.toLowerCase())
+  assert.equal((await request('/auth/session', { walletAddress: account.address, signature }, '')).status, 400)
   const csrf = await fetch(base + '/api/config', { method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: '{}' })
   assert.equal(csrf.status, 403)
-  const foreign = await fetch(base + '/api/auth/session', { method: 'POST', headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken: 'test-user' }) })
+  const foreign = await fetch(base + '/api/auth/session', { method: 'POST', headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' }, body: JSON.stringify({ walletAddress: account.address, signature }) })
   assert.equal(foreign.status, 403)
   const out = await fetch(base + '/api/auth/logout', { method: 'POST', headers: { Cookie: cookie, 'X-Requested-With': 'OnlyAgent' } })
   assert.equal(out.status, 200)
   assert.equal((await fetch(base + '/api/auth/me', { headers: { Cookie: cookie } })).status, 401)
+  const expired = await request('/auth/challenge', { walletAddress: account.address }, '')
+  const expiredSignature = await account.signMessage({ message: expired.data.message })
+  db.prepare('UPDATE auth_challenges SET expiresAt = 0 WHERE wallet = ?').run(account.address.toLowerCase())
+  assert.equal((await request('/auth/session', { walletAddress: account.address, signature: expiredSignature }, '')).status, 400)
 })
 
 test('only admins can change global settings and Gemini runtime generates real-shaped responses', async () => {
@@ -262,7 +276,7 @@ test('only admins can change global settings and Gemini runtime generates real-s
 })
 
 test('daily quotas persist and block provider spending while allowing ordinary account actions', async () => {
-  db.prepare('DELETE FROM api_usage WHERE ownerId = ?').run('other-user@example.test')
+  db.prepare('DELETE FROM api_usage WHERE ownerId = ?').run(testWallets['other-user'])
   process.env.DAILY_AI_CALL_LIMIT = '1'
   try {
     assert.equal((await request('/tasks', { task: 'One allowed task' }, 'other-user')).status, 200)
@@ -275,27 +289,21 @@ test('daily quotas persist and block provider spending while allowing ordinary a
   } finally { process.env.DAILY_AI_CALL_LIMIT = '1000' }
 })
 
-test('wallet linkage verifies signatures, expiry, single use and account ownership', async () => {
-  const account = privateKeyToAccount('0x' + '11'.repeat(32))
-  const other = privateKeyToAccount('0x' + '22'.repeat(32))
-  const body = { walletAddress: account.address }
-  assert.equal((await request('/agents/custom', body)).status, 403)
-  const challenge = await request('/wallet/challenge', body)
-  const invalid = await other.signMessage({ message: challenge.data.message })
-  assert.equal((await request('/wallet/verify', { ...body, signature: invalid })).status, 403)
-  const signature = await account.signMessage({ message: challenge.data.message })
-  assert.equal((await request('/wallet/verify', { ...body, signature })).status, 200)
-  assert.equal((await request('/wallet/verify', { ...body, signature })).status, 400)
-  assert.equal((await request('/wallet')).data.wallets.length, 1)
-  const someoneElse = await request('/wallet/challenge', body, 'other-user')
-  const signed = await account.signMessage({ message: someoneElse.data.message })
-  assert.equal((await request('/wallet/verify', { ...body, signature: signed }, 'other-user')).status, 409)
-  db.prepare('UPDATE wallet_challenges SET expiresAt = 0 WHERE ownerId = ?').run('other-user@example.test')
-  assert.equal((await request('/wallet/verify', { ...body, signature: signed }, 'other-user')).status, 400)
+test('wallet identity alone authorizes payments and rejects another connected wallet', async () => {
+  const status = await request('/wallet')
+  assert.deepEqual(status.data.wallets, [{ wallet: testWallets['test-user'] }])
+  assert.equal((await request('/agents/custom', { walletAddress: testWallets['other-user'] })).status, 403)
+  assert.equal((await request('/agents/custom', { walletAddress: testWallets['test-user'] })).status, 400)
+  assert.equal((await request('/wallet/challenge', { walletAddress: testWallets['test-user'] })).status, 404)
+  assert.equal((await request('/wallet/verify', { walletAddress: testWallets['test-user'] })).status, 404)
+  assert.equal((await request('/auth/me')).data.user.email, undefined)
+  assert.equal((await request('/profile')).data.profile.email, undefined)
+  assert.equal((await request('/wallet/transactions?walletAddress=' + testWallets['other-user'])).status, 403)
+  assert.equal((await request('/wallet/transactions?walletAddress=' + testWallets['test-user'] + '&beforeBlock=invalid')).status, 400)
 })
 
 test('task idempotency replays durable results and rejects changed payloads', async () => {
-  const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer test-user', 'Idempotency-Key': 'release-plan-1' }
+  const headers = { 'Content-Type': 'application/json', Cookie: sessionCookie('test-user'), 'X-Requested-With': 'OnlyAgent', 'Idempotency-Key': 'release-plan-1' }
   const submit = (task) => fetch(base + '/api/tasks', { method: 'POST', headers, body: JSON.stringify({ task }) })
   const first = await (await submit('A repeatable release plan')).json()
   const calls = fixture.state.calls

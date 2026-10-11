@@ -1,5 +1,4 @@
 import { useAuth } from '../AuthContext'
-import GoogleSignInButton from '../components/GoogleSignInButton'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -48,7 +47,7 @@ const PERSONAS = [
 ]
 
 const STEPS = [
-  { icon: Users, title: 'Sign in', text: 'Sign in with Google to use the marketplace and task runner.' },
+  { icon: Users, title: 'Sign in', text: 'Connect your wallet to use the marketplace and task runner.' },
   { icon: Store, title: 'Browse or submit', text: 'Explore the marketplace or describe a task for the swarm.' },
   { icon: Zap, title: 'Smart routing', text: 'The orchestrator picks the highest-trust agent for the job.' },
   { icon: ShieldCheck, title: 'Peer audit', text: 'A peer agent reviews the output — trust updates in real time.' },
@@ -130,7 +129,16 @@ function StepCard({ icon: Icon, title, text, step, hasArrow, offsetClass = '' })
 }
 
 export default function Landing() {
-  const { user, error } = useAuth()
+  const { user, error, signIn, connecting } = useAuth()
+  const signInButton = (
+    <button
+      onClick={signIn}
+      disabled={connecting}
+      className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white text-brand-700 text-sm font-semibold hover:bg-white/90 disabled:cursor-wait disabled:opacity-60 transition-colors"
+    >
+      {connecting ? 'Connecting wallet…' : 'Sign in with wallet'}
+    </button>
+  )
   const [scrolled, setScrolled] = useState(false)
 
   // Navbar morphs into a floating glass pill once the page is scrolled.
@@ -190,7 +198,7 @@ export default function Landing() {
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white text-brand-700 text-sm font-semibold hover:bg-white/90 transition-colors"
               >
                 Open dashboard <ArrowRight size={15} />
-              </Link>) : <GoogleSignInButton />}
+              </Link>) : signInButton}
             </div>
           </div>
         </header>
@@ -217,8 +225,8 @@ export default function Landing() {
                 className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full bg-brand-600 text-white font-semibold hover:bg-brand-700 transition-colors shadow-lg shadow-brand-600/20"
               >
                 Open the app <ArrowRight size={17} />
-              </Link>) : <GoogleSignInButton />}
-              <p className="text-xs text-slate-400">Sign in with Google to open the workspace. Live tasks use Google Gemini.</p>
+              </Link>) : signInButton}
+              <p className="text-xs text-slate-400">Connect and sign with your wallet to open the workspace. Live tasks use Google Gemini.</p>
             </div>
 
             {error && <p role="alert" className="text-red-300">{error}</p>}

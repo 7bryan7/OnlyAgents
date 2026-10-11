@@ -8,7 +8,7 @@ import { trustColor } from '../agentMeta'
  * Global search — live dropdown over agents, swarms and audits.
  * Click a result to navigate; Enter opens the first match.
  */
-export default function GlobalSearch() {
+export default function GlobalSearch({ autoFocus = false }) {
   const { agents, swarms, audits } = useData()
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
@@ -63,7 +63,7 @@ export default function GlobalSearch() {
   return (
     <div ref={boxRef} className="flex-1 max-w-md relative">
       <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-      <input
+      <input autoFocus={autoFocus}
         value={q}
         onChange={(e) => {
           setQ(e.target.value)

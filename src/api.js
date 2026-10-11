@@ -37,7 +37,7 @@ async function post(path, body) {
   })
   checkAuth(res)
   const data = await readJson(res)
-  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`)
+  if (!res.ok) throw Object.assign(new Error(data.error || `${res.status} ${res.statusText}`), { transactionReverted: data.transactionReverted === true })
   return data
 }
 
@@ -65,9 +65,19 @@ export const api = {
   updateRuntime(body) { return put('/api/runtime', body) },
   checkRuntime() { return post('/api/runtime/check') },
   usage() { return get('/api/usage') },
+  outcomes() { return get('/api/outcomes') },
+  outcome(id) { return get(`/api/outcomes/${encodeURIComponent(id)}`) },
+  disputes() { return get('/api/disputes') },
+  dispute(id) { return get(`/api/disputes/${encodeURIComponent(id)}`) },
+  adminDisputes() { return get('/api/admin/disputes') },
+  adminDispute(id) { return get(`/api/admin/disputes/${encodeURIComponent(id)}`) },
+  resolveDispute(id, decision, note = '', txHash) { return post(`/api/disputes/${encodeURIComponent(id)}/resolve`, { decision, note, txHash }) },
   walletStatus() { return get('/api/wallet') },
-  walletChallenge(walletAddress) { return post('/api/wallet/challenge', { walletAddress }) },
-  verifyWallet(walletAddress, signature) { return post('/api/wallet/verify', { walletAddress, signature }) },
+  walletTransactions(walletAddress, beforeBlock) {
+    const query = new URLSearchParams({ walletAddress })
+    if (beforeBlock !== undefined) query.set('beforeBlock', beforeBlock)
+    return get('/api/wallet/transactions?' + query)
+  },
   async events() { return get('/api/events') },
   async health() {
     try {
@@ -117,9 +127,10 @@ export const api = {
   requestRevision(taskId, request) {
     return post(`/api/tasks/${taskId}/revision`, { request })
   },
-  openDispute(taskId, reason) {
-    return post(`/api/tasks/${taskId}/dispute`, { reason })
+  openDispute(taskId, reason, txHash) {
+    return post(`/api/tasks/${taskId}/dispute`, { reason, txHash })
   },
+  syncEscrow(taskId) { return post(`/api/tasks/${encodeURIComponent(taskId)}/sync`) },
   retryTask(taskId) { return post(`/api/tasks/${taskId}/retry`) },
   task(taskId) { return get(`/api/tasks/${taskId}`) },
 
@@ -137,9 +148,9 @@ export const api = {
   },
 
   // User profile (PRD §4.1): wallet address + owned agents, persisted server-side
-  async profile(email) {
+  async profile() {
     try {
-      const d = await get(`/api/profile?email=${encodeURIComponent(email)}`)
+      const d = await get('/api/profile')
       return { profile: d.profile, live: true }
     } catch {
       return { profile: null, live: false }
@@ -204,6 +215,9 @@ export const api = {
 
   async tasks() {
     return get('/api/tasks')
+  },
+  async retryDisputeReview(disputeId) {
+    return post(`/api/disputes/${disputeId}/retry-review`, {})
   },
 
   async treasury() {

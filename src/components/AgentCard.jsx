@@ -30,7 +30,7 @@ export default function AgentCard({ agent, compact = false, onHireClick }) {
   return (
     <div
       onClick={() => navigate(`/app/agents/${agent.id}`)}
-      className="card-lift cursor-pointer bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 hover:border-brand-300 dark:hover:border-brand-500/30"
+      className="ui-agent-card ui-panel card-lift cursor-pointer bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 hover:border-brand-300 dark:hover:border-brand-500/30"
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
@@ -56,7 +56,7 @@ export default function AgentCard({ agent, compact = false, onHireClick }) {
 
       <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 leading-relaxed line-clamp-2 min-h-[2rem]">{agent.description}</p>
 
-      <div className="mt-3 flex items-center justify-between rounded-lg border border-slate-100 dark:border-slate-800 px-2.5 py-2">
+      <div className="ui-agent-evidence mt-3 flex items-center justify-between rounded-lg border border-slate-100 dark:border-slate-800 px-2.5 py-2">
         <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold" style={{ color: confidenceColor }}>
           <ShieldCheck size={12} /> {confidence}
         </span>
@@ -130,7 +130,7 @@ export default function AgentCard({ agent, compact = false, onHireClick }) {
 
 function Metric({ label, value, suffix, color }) {
   return (
-    <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-2.5 py-2">
+    <div className="ui-agent-metric rounded-lg bg-slate-50 dark:bg-slate-800/50 px-2.5 py-2">
       <div className="text-[9px] uppercase tracking-wide text-slate-400 dark:text-slate-500 font-semibold">{label}</div>
       <div className="text-sm font-bold text-slate-800 dark:text-slate-200 tabular-nums" style={{ color }}>
         {value}

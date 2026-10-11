@@ -12,6 +12,7 @@ import Swarms from './pages/Swarms'
 import Audits from './pages/Audits'
 import AgentDetail from './pages/AgentDetail'
 import Connections from './pages/Connections'
+import WalletPage from './pages/Wallet'
 import Feed from './pages/Feed'
 import Tasks from './pages/Tasks'
 import { WalletProvider } from './hooks/useWallet'
@@ -59,9 +60,9 @@ function ProtectedApp() {
   if (loading) return <div className="p-10">Checking your session...</div>
   if (!user) return <Navigate to="/" replace />
   return (
-    <WalletProvider key={user.email}>
+    <WalletProvider key={user.walletAddress}>
       <WalletGate>
-        <DataProvider key={user.email}>
+        <DataProvider key={user.walletAddress}>
           <Routes>
             <Route element={<Layout />}>
               <Route index element={<Dashboard />} />
@@ -71,6 +72,7 @@ function ProtectedApp() {
               <Route path="swarms" element={<Swarms />} />
               <Route path="audits" element={<Audits />} />
               <Route path="connections" element={<Connections />} />
+              <Route path="wallet" element={<WalletPage />} />
               <Route path="agents/:id" element={<AgentDetail />} />
               <Route path="*" element={<Navigate to="/app" replace />} />
             </Route>

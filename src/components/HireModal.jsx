@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Wallet, Loader2, CheckCircle2, ShieldCheck, ArrowRight, Lock, Handshake, Bot } from 'lucide-react'
 import { useWallet } from '../hooks/useWallet'
 import { useData } from '../DataContext'
 import { api } from '../api'
+import { useAuth } from '../AuthContext'
+import { pendingEscrowAction, pendingPaymentKey, pendingHireKey } from '../escrowPending'
 
 const SUGGESTIONS = [
   'Write a launch post for the new dashboard',
@@ -22,6 +24,7 @@ function fmtEth(v) {
 export default function HireModal({ agent, chain, open, onClose }) {
   const { hireTask, confirmTask, mode } = useData()
   const wallet = useWallet()
+  const { user } = useAuth()
   const [step, setStep] = useState('form') // form → pay → executing → confirm → done
   const [task, setTask] = useState('')
   const [amount, setAmount] = useState('0.001')
@@ -30,6 +33,18 @@ export default function HireModal({ agent, chain, open, onClose }) {
   const [payout, setPayout] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [recoveryHash, setRecoveryHash] = useState('')
+  const hireKey = user?.walletAddress && agent?.id ? pendingHireKey(user.walletAddress, agent.id) : null
+
+  useEffect(() => {
+    if (!open || !hireKey) return
+    const pending = pendingEscrowAction(hireKey)
+    if (pending?.txHash) {
+      setTask(pending.task)
+      setAmount(String(pending.amountEth))
+      setTxHash(pending.txHash)
+    }
+  }, [open, hireKey])
 
   if (!open || !agent) return null
 
@@ -47,6 +62,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
     setResult(null)
     setPayout(null)
     setError('')
+    setRecoveryHash('')
     wallet.setError(null)
   }
 
@@ -56,7 +72,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
     onClose()
   }
 
-  const payAndHire = async () => {
+  const payAndHire = async (existingHash) => {
     if (!task.trim() || !(amountNum > 0) || busy) return
     if (mode !== 'gemini') { setError('Configure Gemini before locking any payment.'); return }
     setBusy(true)
@@ -71,26 +87,45 @@ export default function HireModal({ agent, chain, open, onClose }) {
         setError('TaskEscrow not deployed yet — hiring is disabled until contracts are on-chain.')
         return
       }
+      if (!chain?.escrowReady) { setError(chain?.escrowError || 'Dispute-aware escrow hiring is not ready.'); return }
       const agentOwner = agent.walletAddress || chain?.treasury
+      const saved = pendingEscrowAction(hireKey)
+      const payload = saved?.txHash ? saved : {
+        task: task.trim(), agentId: agent.id, amountEth: amount,
+        walletAddress: wallet.address, escrowAddress,
+      }
+      if (payload.walletAddress.toLowerCase() !== wallet.address.toLowerCase()) throw new Error('Reconnect the wallet that submitted this payment.')
+      if (payload.escrowAddress.toLowerCase() !== escrowAddress.toLowerCase()) throw new Error('This pending payment belongs to a different escrow contract. Open Task Runner for recovery.')
       setStep('pay')
-      const hash = txHash || await wallet.createEscrowTask({ escrowAddress, agentOwner, amountEth: amountNum })
+      const remember = hash => {
+        sessionStorage.setItem(hireKey, JSON.stringify({ ...payload, txHash: hash }))
+        setTxHash(hash)
+      }
+      const hash = payload.txHash || txHash || existingHash || await wallet.createEscrowTask({ escrowAddress, agentOwner, amountEth: payload.amountEth,
+        onSubmitted: remember,
+        onReverted: () => { sessionStorage.removeItem(hireKey); setTxHash(null) },
+      })
       if (!hash) {
         setError(wallet.error || 'Escrow transaction failed')
         setStep('form')
         return
       }
-      setTxHash(hash)
+      remember(hash)
       setStep('executing')
       const r = await hireTask({
-        task: task.trim(),
-        agentId: agent.id,
-        amountEth: amountNum,
+        task: payload.task,
+        agentId: payload.agentId,
+        amountEth: payload.amountEth,
         txHash: hash,
-        walletAddress: wallet.address,
+        walletAddress: payload.walletAddress,
       })
+      sessionStorage.removeItem(hireKey)
       setResult(r)
-      if (!r.execution.success) { setError(r.execution.output); setStep('failed') } else setStep('confirm')
+      if (!r.execution) setStep('ledger')
+      else if (!r.execution.success) { setError(r.execution.output); setStep('failed') }
+      else setStep(r.task.status === 'completed' ? 'confirm' : r.task.status === 'delivery_pending' ? 'delivery_pending' : 'ledger')
     } catch (e) {
+      if (e.transactionReverted) { sessionStorage.removeItem(hireKey); setTxHash(null) }
       setError(e.message)
       setStep('form')
     } finally {
@@ -102,16 +137,22 @@ export default function HireModal({ agent, chain, open, onClose }) {
     if (!result || busy) return
     setBusy(true)
     setError('')
+    const key = pendingPaymentKey(user.walletAddress, result.task.id)
     try {
-      const hash = await wallet.completeEscrowTask({ escrowAddress, taskId: result.escrow.taskId })
+      const hash = pendingEscrowAction(key)?.txHash || await wallet.completeEscrowTask({ escrowAddress: result.task.escrowAddress || escrowAddress, taskId: result.escrow.taskId,
+        onSubmitted: submitted => sessionStorage.setItem(key, JSON.stringify({ txHash: submitted })),
+        onReverted: () => sessionStorage.removeItem(key),
+      })
       if (!hash) {
         setError(wallet.error || 'Confirmation transaction failed')
         return
       }
       const p = await confirmTask(result.task.id, hash)
+      sessionStorage.removeItem(key)
       setPayout(p.payout)
       setStep('done')
     } catch (e) {
+      if (e.transactionReverted) sessionStorage.removeItem(key)
       setError(e.message)
     } finally {
       setBusy(false)
@@ -143,9 +184,9 @@ export default function HireModal({ agent, chain, open, onClose }) {
         </div>
 
         <div className="px-6 py-5 space-y-4">
-          {error && (
-            <div className="rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-              {error}
+          {(error || wallet.error) && (
+            <div role="alert" className="rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+              {error || wallet.error}
             </div>
           )}
 
@@ -156,6 +197,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
                 <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Task</label>
                 <textarea
                   value={task}
+                  disabled={!!txHash}
                   onChange={(e) => setTask(e.target.value)}
                   rows={3}
                   placeholder={`Describe the task for ${agent.name}…`}
@@ -165,6 +207,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
                   {SUGGESTIONS.map((s) => (
                     <button
                       key={s}
+                      disabled={!!txHash}
                       onClick={() => setTask(s)}
                       className="text-[10px] px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-brand-50 dark:hover:bg-brand-500/10 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
                     >
@@ -182,6 +225,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
                   max="10"
                   step="0.001"
                   value={amount}
+                  disabled={!!txHash}
                   onChange={(e) => setAmount(e.target.value)}
                   className="mt-1.5 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
@@ -202,13 +246,19 @@ export default function HireModal({ agent, chain, open, onClose }) {
               </div>
 
               <button
-                onClick={payAndHire}
+                onClick={() => payAndHire()}
                 disabled={busy || !task.trim() || !(amountNum > 0)}
                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-bold transition-colors"
               >
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <Handshake size={16} />}
-                {wallet.address ? 'Pay & hire' : 'Connect wallet & pay'}
+                {txHash ? 'Retry payment verification' : wallet.address ? 'Pay & hire' : 'Connect wallet & pay'}
               </button>
+              {txHash ? <p className="text-xs text-slate-500 break-all">Payment submitted: {txHash}. Retrying verifies this payment without sending another transaction.</p> : <details className="text-xs text-slate-500">
+                <summary className="cursor-pointer">Already sent a payment? Recover it</summary>
+                <p className="mt-2">Enter the transaction hash and the original task and amount above. Recovery verifies the existing payment.</p>
+                <input aria-label="Existing payment transaction hash" className="mt-2 w-full rounded-lg border p-2 dark:bg-slate-800" value={recoveryHash} onChange={event => setRecoveryHash(event.target.value.trim())} placeholder="0x…" />
+                <button className="mt-2 rounded-lg bg-brand-600 px-3 py-2 text-white disabled:opacity-40" disabled={busy || !task.trim() || !/^0x[0-9a-fA-F]{64}$/.test(recoveryHash)} onClick={() => payAndHire(recoveryHash)}>Recover existing payment</button>
+              </details>}
             </>
           )}
 
@@ -236,6 +286,24 @@ export default function HireModal({ agent, chain, open, onClose }) {
           )}
 
           {/* Step 4 — confirm */}
+          {step === 'ledger' && result && <div className="space-y-3 text-sm">
+            <p>Escrow status: {result.task.status}. Open Task Runner for the current payment and dispute details.</p>
+            <a className="text-brand-600" href="/app/tasks">Open Task Runner</a>
+          </div>}
+          {step === 'delivery_pending' && result && <div className="space-y-3 text-sm">
+            <p>The output is ready. Delivery confirmation on-chain is pending; payment is held.</p>
+            <p>{result.task.escrowSyncError}</p>
+            <button disabled={busy} className="w-full rounded-lg bg-brand-600 py-3 text-white disabled:opacity-40" onClick={async () => {
+              setBusy(true); setError('')
+              try {
+                const synced = await api.syncEscrow(result.task.id)
+                setResult({ ...result, task: synced.task })
+                if (synced.task.status === 'completed') setStep('confirm')
+                else setError(synced.task.escrowSyncError || `Escrow status: ${synced.task.status}`)
+              } catch (e) { setError(e.message) } finally { setBusy(false) }
+            }}>{busy ? 'Checking delivery…' : 'Retry delivery confirmation'}</button>
+            <a className="text-brand-600" href="/app/tasks">Open Task Runner</a>
+          </div>}
           {step === 'failed' && result && <div className="space-y-3 text-sm">
             <p>Execution failed. The existing escrow remains associated with this task.</p>
             <button disabled={busy} className="w-full rounded-lg bg-brand-600 py-3 text-white disabled:opacity-40" onClick={async () => {
@@ -243,7 +311,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
               try {
                 const retry = await api.retryTask(result.task.id)
                 setResult({ ...result, ...retry })
-                if (retry.execution.success) setStep('confirm')
+                if (retry.execution.success) setStep(retry.task.status === 'delivery_pending' ? 'delivery_pending' : 'confirm')
                 else setError(retry.execution.output)
               } catch (e) { setError(e.message) } finally { setBusy(false) }
             }}>{busy ? 'Retrying…' : 'Retry execution without another payment'}</button>
@@ -251,6 +319,7 @@ export default function HireModal({ agent, chain, open, onClose }) {
           </div>}
           {step === 'confirm' && result && (
             <>
+              {result.task.reviewDeadlineAt && <p className="text-xs text-amber-600">Review by {new Date(result.task.reviewDeadlineAt).toLocaleString()}. Undisputed work can auto-settle after this deadline. Open Task Runner to request a revision or dispute.</p>}
               <div className="rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-500/5 p-4 space-y-2">
                 <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                   <ShieldCheck size={13} className="text-emerald-600 dark:text-emerald-400" />

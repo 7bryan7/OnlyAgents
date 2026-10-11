@@ -18,10 +18,8 @@ services:
         value: production
       - key: DATA_DIR
         value: /var/data
-      - key: VITE_GOOGLE_CLIENT_ID
+      - key: ADMIN_WALLETS
         sync: false
-      - key: ADMIN_EMAILS
-        value: yuginsanthosh1263@gmail.com
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL

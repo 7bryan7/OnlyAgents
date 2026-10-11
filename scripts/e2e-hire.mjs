@@ -2,7 +2,7 @@
 // End-to-end escrow hire flow test against real Base Sepolia:
 //   createTask (0.001 ETH) → POST /api/tasks/hire → completeTask → confirm
 //
-// Uses the deployer wallet (PRIVATE_KEY from .env) as the consumer so the
+// Uses a dedicated test consumer wallet (E2E_CONSUMER_PRIVATE_KEY) so the
 // test needs no MetaMask. The backend verifies every tx on-chain — never
 // trusts the client hash (PRD §7).
 //
@@ -15,13 +15,13 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { baseSepolia } from 'viem/chains'
 
 const API = process.env.API_URL || 'http://localhost:8787'
-const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.GOOGLE_ID_TOKEN || ''}` }
+const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'OnlyAgent' }
 const deployed = JSON.parse(readFileSync(new URL('../deployed.json', import.meta.url), 'utf8'))
 const escrow = deployed.taskEscrow
 const treasury = deployed.treasury
 
 const RPC = process.env.BASE_SEPOLIA_RPC || 'https://sepolia.base.org'
-const account = privateKeyToAccount(process.env.PRIVATE_KEY)
+const account = privateKeyToAccount(process.env.E2E_CONSUMER_PRIVATE_KEY)
 const wallet = createWalletClient({ account, chain: baseSepolia, transport: http(RPC) })
 const publicClient = createPublicClient({ chain: baseSepolia, transport: http(RPC) })
 
@@ -35,8 +35,18 @@ const TASK_TEXT = 'E2E test: summarize the escrow flow in three bullet points.'
 
 async function main() {
   // Validate the session and eligibility before spending any testnet ETH.
+  const challengeRes = await fetch(`${API}/api/auth/challenge`, { method: 'POST', headers, body: JSON.stringify({ walletAddress: account.address }) })
+  if (!challengeRes.ok) throw new Error('Could not start wallet sign-in')
+  const challenge = await challengeRes.json()
+  const signature = await account.signMessage({ message: challenge.message })
+  const login = await fetch(`${API}/api/auth/session`, { method: 'POST', headers, body: JSON.stringify({ walletAddress: account.address, signature }) })
+  if (!login.ok) throw new Error('Could not verify the test consumer wallet')
+  headers.Cookie = login.headers.get('set-cookie')?.split(';')[0]
   const me = await fetch(`${API}/api/auth/me`, { headers })
-  if (!me.ok) throw new Error('Set GOOGLE_ID_TOKEN to a current signed-in Google ID token')
+  if (!me.ok) throw new Error('Wallet session is unavailable')
+  const configuration = await (await fetch(`${API}/api/chain`, { headers })).json()
+  if (!configuration.escrowReady || configuration.taskEscrow?.toLowerCase() !== escrow?.toLowerCase()) throw new Error('Dispute-aware escrow must be ready before spending testnet ETH')
+  if (treasury?.toLowerCase() !== '0x2e0113c8806c8bffd9caa0861a9d1fffe66e48a8') throw new Error('Configured platform treasury does not match the fixed owner')
   const health = await (await fetch(`${API}/api/health`)).json()
   if (health.mode !== 'gemini') throw new Error('Configure Gemini before creating an escrow')
   const agentResponse = await fetch(`${API}/api/agents/ag-102`, { headers })
@@ -79,6 +89,7 @@ async function main() {
     return
   }
   if (!hire.execution.success) throw new Error('Execution failed; payment has not been confirmed: ' + hire.execution.output)
+  if (hire.task.status !== 'completed') throw new Error('Delivery is not confirmed on-chain; recover from Task Runner before releasing payment')
   console.log('      task id :', hire.task.id, `(${hire.task.status})`)
   console.log('      escrow  : task #', hire.escrow.taskId, '· payout', hire.escrow.payoutEth, '· fee', hire.escrow.feeEth)
   console.log('      agent   :', hire.execution.agent.name, '·', hire.execution.latencyMs, 'ms')

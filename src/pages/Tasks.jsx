@@ -3,9 +3,13 @@ import { api } from '../api'
 import { onWSMessage } from '../ws'
 import { useWallet } from '../hooks/useWallet'
 import TaskRunner from '../components/TaskRunner'
+import DisputesPanel from '../components/DisputesPanel'
+import { useAuth } from '../AuthContext'
+import { pendingEscrowAction, pendingPaymentKey } from '../escrowPending'
 
 export default function Tasks() {
   const wallet = useWallet()
+  const { user } = useAuth()
   const [tasks, setTasks] = useState([])
   const [detail, setDetail] = useState(null)
   const [expandedTaskId, setExpandedTaskId] = useState(null)
@@ -39,22 +43,34 @@ export default function Tasks() {
       const result = await api.retryTask(id)
       setDetail(result)
       setExpandedTaskId(id)
-      if (result.execution.success) await api.auditTask(id)
+      if (result.execution.success && result.task.status === 'completed') await api.auditTask(id)
       await load()
     } catch (e) { setError(e.message); await load() } finally { setBusy(false) }
   }
   async function settle(task) {
     setBusy(true); setError('')
+    const key = pendingPaymentKey(user.walletAddress, task.id)
     try {
-      if (!wallet.address) { await wallet.connect(); setError('Select the payment wallet, then click release again.'); return }
-      if (wallet.address.toLowerCase() !== task.consumer?.toLowerCase()) throw new Error('Select the wallet that created this escrow in MetaMask.')
-      const { chain } = await api.chain()
-      if (!chain?.taskEscrow) throw new Error('TaskEscrow is not configured.')
-      const txHash = await wallet.completeEscrowTask({ escrowAddress: chain.taskEscrow, taskId: task.escrowTaskId })
-      if (!txHash) throw new Error('Settlement was not completed. Check the wallet message.')
+      let txHash = pendingEscrowAction(key)?.txHash
+      if (!txHash) {
+        if (!wallet.address) { await wallet.connect(); setError('Select the payment wallet, then click release again.'); return }
+        if (wallet.address.toLowerCase() !== task.consumer?.toLowerCase()) throw new Error('Select the wallet that created this escrow in MetaMask.')
+        const { chain } = await api.chain()
+        const escrowAddress = task.escrowAddress || chain?.taskEscrow
+        if (!escrowAddress) throw new Error('TaskEscrow is not configured.')
+        txHash = await wallet.completeEscrowTask({ escrowAddress, taskId: task.escrowTaskId,
+          onSubmitted: hash => sessionStorage.setItem(key, JSON.stringify({ txHash: hash })),
+          onReverted: () => sessionStorage.removeItem(key),
+        })
+        if (!txHash) throw new Error('Settlement was not completed. Check the wallet message.')
+      }
       await api.confirmTask(task.id, txHash)
+      sessionStorage.removeItem(key)
       await load(); await view(task.id)
-    } catch (e) { setError(e.message) } finally { setBusy(false) }
+    } catch (e) {
+      if (e.transactionReverted) sessionStorage.removeItem(key)
+      setError(e.message)
+    } finally { setBusy(false) }
   }
   async function approve(task) {
     if (busy) return
@@ -68,15 +84,44 @@ export default function Tasks() {
     try { setBusy(true); await api.requestRevision(task.id, request); await load(); await view(task.id) } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
   async function dispute(task) {
-    const reason = window.prompt('Why should this task be reviewed?')
+    if (busy) return
+    const key = `oa:dispute:${user.walletAddress}:${task.id}`
+    const pending = pendingEscrowAction(key)
+    const reason = pending?.reason || window.prompt('Why should this task be reviewed?')?.trim()
     if (!reason) return
-    try { await api.openDispute(task.id, reason); await load(); await view(task.id) } catch (e) { setError(e.message) }
+    if (reason.length < 10 || reason.length > 1000) { setError('Dispute reason must be 10–1000 characters.'); return }
+    setBusy(true); setError('')
+    try {
+      let txHash = pending?.txHash
+      if (task.escrowTaskId) {
+        if (task.escrowVersion !== 2) throw new Error('This legacy escrow cannot freeze payment or refund disputes. Contact the administrator.')
+        if (wallet.address?.toLowerCase() !== task.consumer.toLowerCase()) throw new Error('Select the wallet that created this escrow in MetaMask.')
+        if (!txHash) {
+          txHash = await wallet.disputeTransaction({
+            escrowAddress: task.escrowAddress, taskId: task.escrowTaskId, reason,
+            onSubmitted: hash => sessionStorage.setItem(key, JSON.stringify({ txHash: hash, reason })),
+            onReverted: () => sessionStorage.removeItem(key),
+          })
+          if (!txHash) throw new Error('Dispute was not confirmed. Check MetaMask; a submitted transaction is retained for verification.')
+        }
+      }
+      await api.openDispute(task.id, reason, txHash)
+      sessionStorage.removeItem(key)
+      await load(); await view(task.id)
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
-  return <div className="w-full space-y-5 text-slate-800 dark:text-slate-200">
-    <h1 className="font-sora text-2xl font-bold">Task Runner</h1>
-    <p className="text-sm text-slate-500">Run new tasks, review recent executions, and manage revisions or payment approval.</p>
+  async function sync(task) {
+    if (busy) return
+    setBusy(true); setError('')
+    try { await api.syncEscrow(task.id); await load() } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+  return <div className="ui-section tasks-section w-full max-w-[1452px] mx-auto space-y-5 text-slate-800 dark:text-slate-200">
+    <div><span className="ui-eyebrow">Your execution workspace</span>
+          <h1 className="font-sora text-2xl font-bold">Task Runner</h1>
+    <p className="text-sm text-slate-500">Run new tasks, review recent executions, and manage revisions or payment approval.</p></div>
     <div className="rounded-lg border border-brand-200 dark:border-brand-500/30 bg-brand-50/60 dark:bg-brand-500/5 px-3 py-2 text-xs text-brand-700 dark:text-brand-300">Private workspace: your task prompts and outputs are visible only to you. Aggregate performance signals improve public agent reputation.</div>
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+    {wallet.error && <p role="alert" className="text-sm text-red-600">{wallet.error}</p>}
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-5 items-start">
       <section className="space-y-3">
         <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">Run a new task</h2>
@@ -87,15 +132,22 @@ export default function Tasks() {
         {loading ? <p>Loading recent task runs…</p> : !tasks.length ? <p>No task runs recorded yet. Use the runner above to get started.</p> :
           <div className="space-y-3">{tasks.map((task) => {
             const expanded = expandedTaskId === task.id && detail?.task?.id === task.id
-            return <article key={task.id} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            return <article key={task.id} className="ui-panel rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <div className="flex justify-between gap-3"><p className="font-semibold text-sm">{task.task}</p><span className="text-xs">{task.status}</span></div>
               <p className="text-xs text-slate-500 mt-2">{task.agent?.name || task.agentId} · {new Date(task.ts).toLocaleString()} · {task.source || 'unverified'}{task.model ? ' / ' + task.model : ''}</p>
-              {task.status === 'completed' && task.reviewDeadlineAt && <p className="text-xs text-amber-600 mt-1">Review by {new Date(task.reviewDeadlineAt).toLocaleString()} · payment remains held until approval</p>}
+              {task.status === 'completed' && task.reviewDeadlineAt && <p className="text-xs text-amber-600 mt-1">Review by {new Date(task.reviewDeadlineAt).toLocaleString()}{task.escrowVersion === 2 ? ' · undisputed work can auto-settle after this deadline' : ''}</p>}
+              {task.escrowSyncError && <p className="text-xs text-amber-600 mt-1">{task.escrowSyncError}</p>}
+              {task.escrowTaskId && task.escrowVersion !== 2 && <p className="text-xs text-amber-600 mt-1">Legacy escrow: automatic payout follows the original contract; payment cannot be frozen or refunded through a dispute.</p>}
               {task.escrowTaskId && <p className="text-xs text-slate-500 mt-1">Escrow #{task.escrowTaskId} · {task.amountEth} ETH · {task.txHash}</p>}
+              {pendingEscrowAction(pendingPaymentKey(user.walletAddress, task.id)) && <button disabled={busy} onClick={() => settle(task)} className="text-sm text-brand-600 disabled:opacity-40">Retry payment verification</button>}
               <div className="mt-3 flex flex-wrap gap-3">
                 <button className="text-sm text-brand-600" onClick={() => view(task.id)}>{expanded ? 'Close' : 'View output'}</button>
-                {task.status === 'failed' && <button className="text-sm text-brand-600 disabled:opacity-40" disabled={busy} onClick={() => retry(task.id)}>{busy ? 'Retrying…' : 'Retry execution'}</button>}
+                {['failed', 'revision_interrupted', 'revision_hold_interrupted'].includes(task.status) && <button className="text-sm text-brand-600 disabled:opacity-40" disabled={busy} onClick={() => retry(task.id)}>{busy ? 'Retrying…' : task.revisionRequest ? 'Retry saved revision' : 'Retry execution'}</button>}
                 {task.status === 'completed' && <><button className="text-sm text-brand-600 disabled:opacity-40" disabled={busy} onClick={() => approve(task)}>Approve{task.escrowTaskId ? ' & release payment' : ''}</button><button className="text-sm text-brand-600 disabled:opacity-40" disabled={busy} onClick={() => revision(task)}>Request revision</button><button className="text-sm text-amber-600 disabled:opacity-40" disabled={busy} onClick={() => dispute(task)}>Dispute</button></>}
+                {task.status === 'review_expired' && !task.escrowTaskId && <button className="text-sm text-amber-600 disabled:opacity-40" disabled={busy} onClick={() => dispute(task)}>Dispute</button>}
+                {task.escrowVersion === 2 && ['failed', 'delivery_pending'].includes(task.status) && <button disabled={busy} onClick={() => dispute(task)} className="text-sm text-amber-600 disabled:opacity-40">Dispute & freeze payment</button>}
+                {task.escrowVersion === 2 && pendingEscrowAction(`oa:dispute:${user.walletAddress}:${task.id}`) && task.status === 'disputed' && <button disabled={busy} onClick={() => dispute(task)} className="text-sm text-amber-600">Finish recording dispute</button>}
+                {task.escrowVersion === 2 && !['paid', 'released', 'refunded'].includes(task.status) && <button disabled={busy} onClick={() => sync(task)} className="text-sm text-brand-600 disabled:opacity-40">{busy ? 'Checking…' : 'Sync escrow'}</button>}
               </div>
               {expanded && <section className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
                 <h3 className="font-semibold text-sm">Execution details</h3>
@@ -106,5 +158,6 @@ export default function Tasks() {
           })}</div>}
       </section>
     </div>
+    <DisputesPanel />
   </div>
 }

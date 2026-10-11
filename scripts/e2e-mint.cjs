@@ -8,8 +8,8 @@
 const hre = require('hardhat')
 
 async function main() {
-  const [deployer, user] = await hre.ethers.getSigners()
-  const treasury = deployer.address
+  const [, user] = await hre.ethers.getSigners()
+  const treasury = '0x2e0113c8806c8bFFd9cAA0861a9D1ffFE66E48A8'
 
   // 1. Deploy
   const AgentFactory = await hre.ethers.getContractFactory('AgentFactory')
@@ -33,8 +33,8 @@ async function main() {
   console.log(`BASE_SEPOLIA_RPC=http://127.0.0.1:8545`)
   console.log(`BASE_SEPOLIA_AGENT_FACTORY=${factoryAddr}`)
   console.log(`\nPOST /api/agents/custom body:`)
-  console.log('Requires Authorization: Bearer <current Google ID token>. Owner identity comes from the token.')
-  console.log(JSON.stringify({ txHash: receipt.hash, walletAddress: user.address, name, personaPrompt, specialty, email: 'owner@demo.io' }, null, 2))
+  console.log('Sign in with the minting wallet; send its oa_session cookie and X-Requested-With: OnlyAgent. Identity comes from the verified session.')
+  console.log(JSON.stringify({ txHash: receipt.hash, walletAddress: user.address, name, personaPrompt, specialty }, null, 2))
 }
 
 main().catch((e) => {

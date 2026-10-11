@@ -15,6 +15,7 @@ import { resolve } from 'node:path'
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { migrateWalletIdentity } from './wallet-migration.js'
 
 const DATA_DIR = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : fileURLToPath(new URL('../data', import.meta.url))
 const DB_FILE = `${DATA_DIR}/store.db`
@@ -29,9 +30,8 @@ db.pragma('journal_mode = WAL')
 // ---------------------------------------------------------------------------
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
-    id            TEXT PRIMARY KEY,          -- email (Google sub as fallback)
+    id            TEXT PRIMARY KEY,          -- normalized wallet address
     name          TEXT NOT NULL,
-    email         TEXT NOT NULL,
     picture       TEXT,
     walletAddress TEXT,                      -- connected wallet (PRD §4.1)
     created_at    INTEGER NOT NULL
@@ -145,6 +145,9 @@ ensureColumn('tasks', 'paidAt', 'paidAt INTEGER')
 ensureColumn('tasks', 'reviewDeadlineAt', 'reviewDeadlineAt INTEGER')
 ensureColumn('tasks', 'revisionCount', 'revisionCount INTEGER NOT NULL DEFAULT 0')
 ensureColumn('tasks', 'revisionRequest', 'revisionRequest TEXT')
+ensureColumn('tasks', 'escrowAddress', 'escrowAddress TEXT')
+ensureColumn('tasks', 'escrowVersion', 'escrowVersion INTEGER')
+ensureColumn('tasks', 'escrowSyncError', 'escrowSyncError TEXT')
 
 // ---------------------------------------------------------------------------
 // Collection load/save
@@ -181,11 +184,14 @@ export function archiveUnverifiedActivity() {
   console.log(`[db] archived unverified activity to ${archive}`)
   return { archive, counts }
 }
+const walletMigration = migrateWalletIdentity(db)
+if (walletMigration) console.log('[db] migrated wallet-only identities:', JSON.stringify(walletMigration))
+
 const stmts = {
   users: {
     insert: db.prepare(
-      `INSERT OR REPLACE INTO users (id, name, email, picture, walletAddress, created_at)
-       VALUES (@id, @name, @email, @picture, @walletAddress, @created_at)`
+      `INSERT OR REPLACE INTO users (id, name, picture, walletAddress, created_at)
+       VALUES (@id, @name, @picture, @walletAddress, @created_at)`
     ),
     all: db.prepare('SELECT * FROM users'),
   },
@@ -216,8 +222,8 @@ const stmts = {
   },
   tasks: {
     insert: db.prepare(
-      `INSERT OR REPLACE INTO tasks (id, task, agentId, status, executionId, ts, escrowTaskId, consumer, amountEth, txHash, payoutEth, feeEth, paidAt, auditId, ownerId, reviewDeadlineAt, revisionCount, revisionRequest)
-       VALUES (@id, @task, @agentId, @status, @executionId, @ts, @escrowTaskId, @consumer, @amountEth, @txHash, @payoutEth, @feeEth, @paidAt, @auditId, @ownerId, @reviewDeadlineAt, @revisionCount, @revisionRequest)`
+      `INSERT OR REPLACE INTO tasks (id, task, agentId, status, executionId, ts, escrowTaskId, consumer, amountEth, txHash, payoutEth, feeEth, paidAt, auditId, ownerId, reviewDeadlineAt, revisionCount, revisionRequest, escrowAddress, escrowVersion, escrowSyncError)
+       VALUES (@id, @task, @agentId, @status, @executionId, @ts, @escrowTaskId, @consumer, @amountEth, @txHash, @payoutEth, @feeEth, @paidAt, @auditId, @ownerId, @reviewDeadlineAt, @revisionCount, @revisionRequest, @escrowAddress, @escrowVersion, @escrowSyncError)`
     ),
     all: db.prepare('SELECT * FROM tasks'),
   },
@@ -280,7 +286,7 @@ export function dbSaveAll({ users, agents, executions, audits, tasks, config, fe
     )
     executions.forEach((e) => stmts.executions.insert.run({ ...e, success: e.success ? 1 : 0 }))
     audits.forEach((a) => stmts.audits.insert.run(a))
-    tasks.forEach((t) => stmts.tasks.insert.run({ executionId: null, escrowTaskId: null, consumer: null, amountEth: null, txHash: null, payoutEth: null, feeEth: null, paidAt: null, auditId: null, ownerId: null, reviewDeadlineAt: null, revisionCount: 0, revisionRequest: null, ...t }))
+    tasks.forEach((t) => stmts.tasks.insert.run({ executionId: null, escrowTaskId: null, consumer: null, amountEth: null, txHash: null, payoutEth: null, feeEth: null, paidAt: null, auditId: null, ownerId: null, reviewDeadlineAt: null, revisionCount: 0, revisionRequest: null, escrowAddress: null, escrowVersion: null, escrowSyncError: null, ...t }))
     Object.entries(config).forEach(([k, v]) => stmts.config.upsert.run(k, JSON.stringify(v)))
     ;(feedPosts || []).forEach((p) => stmts.feed_posts.insert.run({ ...p, audit: JSON.stringify(p.audit || null) }))
     ;(feedReactions || []).forEach((r) => stmts.feed_reactions.insert.run(r))

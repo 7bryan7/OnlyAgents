@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test'
+import { installTestSession } from '../browser-fixture.js'
 
 const account = '0x1111111111111111111111111111111111111111'
 
 async function installWallet(page, failure = null) {
+  await installTestSession(page, { provider: false })
   await page.addInitScript(({ account, failure }) => {
-    localStorage.setItem('oa_token', 'test-user')
     window.walletCalls = []
     const listeners = new Map()
     const provider = {
@@ -36,14 +37,18 @@ async function installWallet(page, failure = null) {
   }, { account, failure })
 }
 
-test('discovers MetaMask, connects without switching chains, shares state and restores on reload', async ({ page }) => {
+test('discovers MetaMask, connects without switching chains, shares state and reconnects after reload', async ({ page }) => {
   await installWallet(page)
-  await page.goto('/app/connections')
+  await page.goto('/app/wallet')
   await page.getByRole('button', { name: 'Connect wallet', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Wallet', level: 1, exact: true })).toBeVisible()
   await expect(page.getByText(/Connected 0x111111/)).toBeVisible()
   expect(await page.evaluate(() => window.walletCalls)).not.toContain('wallet_switchEthereumChain')
   await page.reload()
+  await page.getByRole('button', { name: 'Connect wallet', exact: true }).click()
+  await page.getByRole('button', { name: 'Reconnect wallet', exact: true }).click()
   await expect(page.getByText(/Connected 0x111111/)).toBeVisible()
+  await page.locator('button[aria-controls="services-navigation"]').click()
   await page.getByRole('link', { name: 'Agent Marketplace', exact: true }).click()
   await page.getByRole('button', { name: 'Create Agent' }).click()
   await expect(page.getByText('Wallet connected', { exact: true })).toBeVisible()
@@ -58,7 +63,7 @@ for (const scenario of [
 ]) {
   test(`wallet connection displays actionable error for ${scenario.code}`, async ({ page }) => {
     await installWallet(page, scenario.code)
-    await page.goto('/app/connections')
+    await page.goto('/app/wallet')
     await page.getByRole('button', { name: 'Connect wallet', exact: true }).click()
     await expect(page.getByRole('alert')).toContainText(scenario.message)
     await expect(page.getByRole('button', { name: 'Connect wallet', exact: true })).toBeEnabled()
@@ -66,8 +71,8 @@ for (const scenario of [
 }
 
 test('missing extension shows instructions instead of failing silently', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('oa_token', 'test-user'))
-  await page.goto('/app/connections')
+  await installTestSession(page, { provider: false })
+  await page.goto('/app/wallet')
   await page.getByRole('button', { name: 'Connect wallet', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('MetaMask was not detected')
 })

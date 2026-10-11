@@ -3,7 +3,9 @@
 // RPC + deployer key come from .env (BASE_SEPOLIA_RPC, PRIVATE_KEY).
 // ---------------------------------------------------------------------------
 require('@nomicfoundation/hardhat-toolbox')
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
+// Keep the platform deployer key out of server .env / production environments.
+require('dotenv').config({ path: '.env.deploy', override: true, quiet: true })
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {

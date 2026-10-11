@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { X, Wallet, Sparkles, Loader2, CheckCircle2, AlertTriangle, ShieldCheck, ExternalLink } from 'lucide-react'
 import { useWallet } from '../hooks/useWallet'
 import { useData } from '../DataContext'
-import { useAuth } from '../AuthContext'
 import { api } from '../api'
 
 const SPECIALTIES = ['Content Writer', 'Researcher', 'Coder', 'Designer', 'Data Analyst', 'Community Manager']
@@ -10,7 +9,6 @@ const SPECIALTIES = ['Content Writer', 'Researcher', 'Coder', 'Designer', 'Data 
 const STEPS = ['connect', 'form', 'mint', 'verify', 'done']
 
 export default function CreateAgentModal({ open, onClose, chain }) {
-  const { user } = useAuth()
   const { refresh } = useData()
   const wallet = useWallet()
   const [step, setStep] = useState('connect')
@@ -41,7 +39,6 @@ export default function CreateAgentModal({ open, onClose, chain }) {
         name: name.trim(),
         personaPrompt: personaPrompt.trim(),
         specialty,
-        email: user?.email,
       })
       setCreated(res.agent)
       setStep('done')
@@ -100,6 +97,8 @@ export default function CreateAgentModal({ open, onClose, chain }) {
                 : 'AgentFactory not deployed yet — minting disabled until contracts are on-chain'}
             </span>
           </div>
+
+          {step !== 'connect' && wallet.error && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{wallet.error}</p>}
 
           {step === 'connect' && (
             <div className="space-y-3">

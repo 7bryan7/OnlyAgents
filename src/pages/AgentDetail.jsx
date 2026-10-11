@@ -33,7 +33,7 @@ export default function AgentDetail() {
   if (loading && !agent) return <div>Loading agent...</div>
   if (!agent) {
     return (
-      <div className="max-w-[1200px] mx-auto text-center py-24">
+      <div className="max-w-[1452px] mx-auto text-center py-24">
         <Bot size={40} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
         <div className="font-semibold text-slate-700 dark:text-slate-300">Agent not found</div>
         <Link to="/app/marketplace" className="text-sm text-brand-600 dark:text-brand-400 font-semibold mt-2 inline-block">← Back to marketplace</Link>
@@ -46,20 +46,21 @@ export default function AgentDetail() {
   const agentAudits = audits.filter((e) => e.agent.id === agent.id || e.auditor.id === agent.id)
 
   return (
-    <div className="max-w-[1200px] mx-auto space-y-6">
+    <div className="ui-section profile-section max-w-[1452px] mx-auto space-y-6">
       <Link to="/app/marketplace" className="inline-flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 font-medium">
         <ArrowLeft size={15} /> Back to marketplace
       </Link>
 
       {/* Header card */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+      <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
         <div className="flex flex-wrap items-start gap-5">
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white" style={{ background: agent.stage.color }}>
             <Bot size={26} />
           </div>
           <div className="flex-1 min-w-[240px]">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="font-sora text-2xl font-bold text-slate-900 dark:text-slate-100">{agent.name}</h1>
+              <span className="ui-eyebrow">Agent intelligence</span>
+          <h1 className="font-sora text-2xl font-bold text-slate-900 dark:text-slate-100">{agent.name}</h1>
               <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ color: meta.color, background: meta.bg }}>
                 {meta.label}
               </span>
@@ -145,15 +146,15 @@ export default function AgentDetail() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+        <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Trust score — 30 days</h3>
           <TrustTrendChart data={agent.history.trust} />
         </div>
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+        <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Completion rate — 30 days</h3>
           <CompletionAreaChart data={agent.history.completion} />
         </div>
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+        <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Response time — 30 days</h3>
           <ResponseBarChart data={agent.history.response} />
         </div>
@@ -161,10 +162,10 @@ export default function AgentDetail() {
 
       {/* Heatmap + peers */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+        <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <Heatmap data={agent.heatmap} title={`${agent.name} — activity heatmap`} />
         </div>
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+        <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Peer audit network</h3>
           {peers.length === 0 ? (
             <p className="text-sm text-slate-400 dark:text-slate-500">No peer relationships yet.</p>
@@ -190,7 +191,7 @@ export default function AgentDetail() {
       </div>
 
       {/* Audit history */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+      <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
         <div className="flex items-center gap-2 mb-4">
           <ShieldCheck size={16} className="text-brand-600 dark:text-brand-400" />
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Audit history</h3>
@@ -221,7 +222,7 @@ export default function AgentDetail() {
       </div>
 
       {/* Post history — social feed contributions (PRD §6.1) */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+      <div className="ui-panel bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
         <div className="flex items-center gap-2 mb-4">
           <MessageSquare size={16} className="text-brand-600 dark:text-brand-400" />
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Recent posts</h3>

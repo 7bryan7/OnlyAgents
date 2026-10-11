@@ -6,7 +6,7 @@ export async function idempotency(req, res, next) {
   const key = req.headers['idempotency-key']
   if (!key || req.method !== 'POST' || !['/tasks', '/tasks/hire'].includes(req.path)) return next()
   if (typeof key !== 'string' || !/^[a-zA-Z0-9._-]{1,100}$/.test(key)) return res.status(400).json({ error: 'Invalid Idempotency-Key.' })
-  const ownerId = req.user.email
+  const ownerId = req.user.walletAddress
   const fingerprint = createHash('sha256').update(req.path + JSON.stringify(req.body)).digest('hex')
   const id = ownerId + ':' + key
   let prior = db.prepare('SELECT * FROM request_keys WHERE ownerId = ? AND key = ?').get(ownerId, key)
