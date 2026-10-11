@@ -132,6 +132,53 @@ test('interrupted work becomes durably recoverable and config receipt IDs remain
   await withHostedState({ rpc }, async () => assert.equal(store.tasks.find(task => task.id === 'tk-0043').status, 'failed'))
 })
 
+test('hosted HTTP waits for lease release before sending a response and accepts the next scheduled write', async t => {
+  const { default: handler } = await import('../api/index.js')
+  process.env.SUPABASE_URL = 'https://fixture.supabase.co'
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'fixture-server-key'
+  process.env.CRON_SECRET = 'test-only-cron-secret-'.repeat(3)
+  let unblockRelease, notifyRelease, ended = false, released = false
+  const gate = new Promise(resolve => { unblockRelease = resolve })
+  const entered = new Promise(resolve => { notifyRelease = resolve })
+  const originalFetch = globalThis.fetch
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (!String(url).startsWith(process.env.SUPABASE_URL)) return originalFetch(url, options)
+    const name = String(url).split('/').at(-1)
+    if (name === 'oa_release') { notifyRelease(); await gate }
+    const data = await rpc(name, JSON.parse(options.body))
+    if (name === 'oa_release') released = true
+    return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })
+  })
+  const server = createServer((req, res) => {
+    const end = res.end.bind(res)
+    res.end = (...args) => { ended = true; assert.equal(released, true); return end(...args) }
+    handler(req, res)
+  })
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+  const url = `http://127.0.0.1:${server.address().port}/api/index?__oa_path=jobs%2Ftick`
+  const options = { method: 'POST', headers: { Authorization: `Bearer ${process.env.CRON_SECRET}`, 'Content-Type': 'application/json' }, body: '{}' }
+  let pending
+  try {
+    pending = fetch(url, options)
+    await entered
+    assert.equal(ended, false, 'response must stay pending while the lease is held')
+    await assert.rejects(rpc('oa_acquire', { p_owner: '33333333-3333-4333-8333-333333333333' }), /OA_BUSY/)
+    unblockRelease()
+    const response = await pending
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).ok, true)
+    assert.equal(ended, true)
+    const next = await fetch(url, options)
+    assert.equal(next.status, 200, 'next write should not inherit a busy lease')
+    await next.json()
+  } finally {
+    unblockRelease()
+    await pending?.catch(() => {})
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+  }
+})
+
 test('hosted HTTP wallet sessions persist before acknowledgement, reject private history access, and protect cron', async t => {
   const { default: handler } = await import('../api/index.js')
   process.env.SUPABASE_URL = 'https://fixture.supabase.co'
