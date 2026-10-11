@@ -13,8 +13,9 @@ import { AGENTS } from './agents.js'
 import { runAgent, auditOutput } from './runtime.js'
 import { dbSaveAll, dbLoadAll, archiveUnverifiedActivity, dbMaxSeq, dbCounts } from './db.js'
 import { LEGACY_ESCROW_ADDRESS } from './chain.js'
+import { persistenceContext } from './persistence-context.js'
 
-export const store = {
+const initialStore = {
   executions: [], // { id, agentId, task, output, success, latencyMs, ts }
   audits: [], // { id, agentId, auditorId, task, output, verdict, note, ts }
   tasks: [], // { id, task, agentId, status, ts }
@@ -42,6 +43,13 @@ export const store = {
   },
 }
 
+export function createStore() { return structuredClone(initialStore) }
+const localStore = createStore()
+export const store = new Proxy({}, {
+  get(_, key) { return (persistenceContext.getStore()?.store || localStore)[key] },
+  set(_, key, value) { (persistenceContext.getStore()?.store || localStore)[key] = value; return true },
+})
+
 // Merged roster: flagship (code-defined) + custom (on-chain minted).
 export function getAllAgents() {
   return [...AGENTS, ...store.agents]
@@ -54,16 +62,16 @@ export function getAgent(id) {
 // ---------------------------------------------------------------------------
 // Persistence — real records survive restarts (SQLite, git-ignored).
 // ---------------------------------------------------------------------------
-export function loadStore() {
+export function loadStore({ recover = true } = {}) {
   try {
     archiveUnverifiedActivity()
     const data = dbLoadAll()
     store.executions = data.executions
     store.audits = data.audits
-    store.tasks = data.tasks.map((t) => (t.status === 'running' || (t.status === 'escrowed' && !t.executionId)) ? { ...t, status: 'failed' } : t)
+    store.tasks = data.tasks.map((t) => recover && (t.status === 'running' || (t.status === 'escrowed' && !t.executionId)) ? { ...t, status: 'failed' } : t)
     for (const task of store.tasks) {
-      if (task.status === 'revision_requested') task.status = 'revision_interrupted'
-      if (task.status === 'revision_hold_pending') task.status = 'revision_hold_interrupted'
+      if (recover && task.status === 'revision_requested') task.status = 'revision_interrupted'
+      if (recover && task.status === 'revision_hold_pending') task.status = 'revision_hold_interrupted'
       if (task.escrowTaskId && !task.escrowAddress) {
         task.escrowAddress = LEGACY_ESCROW_ADDRESS
         task.escrowVersion = 1
@@ -73,7 +81,7 @@ export function loadStore() {
     store.agents = data.agents
     store.feedPosts = data.feedPosts || []
     store.feedReactions = data.feedReactions || []
-    store.swarmRuns = (data.swarmRuns || []).map((r) => r.status === 'running' ? { ...r, status: 'failed', finishedAt: Date.now(), error: 'Server stopped before this analysis finished. Submit a new analysis.' } : r)
+    store.swarmRuns = (data.swarmRuns || []).map((r) => recover && r.status === 'running' ? { ...r, status: 'failed', finishedAt: Date.now(), error: 'Server stopped before this analysis finished. Submit a new analysis.' } : r)
     if (data.config && Object.keys(data.config).length) {
       store.config = {
         reputation: { ...store.config.reputation, ...data.config.reputation },
@@ -91,13 +99,14 @@ export function loadStore() {
     }
     const counts = dbCounts()
     for (const dispute of store.config.disputes || []) {
-      if (dispute.reviewPending || (dispute.status === 'under_review' && !dispute.review)) {
+      if (recover && (dispute.reviewPending || (dispute.status === 'under_review' && !dispute.review))) {
         dispute.reviewPending = false
         dispute.status = 'review_failed'
         dispute.reviewError = 'Server stopped before the independent review finished. Retry the review or request administrator resolution.'
       }
     }
-    store.seq = Math.max(dbMaxSeq(), counts.executions + counts.audits + counts.tasks + counts.users)
+    const configIds = [...(store.config.customerOutcomes || []), ...(store.config.disputes || [])].map(record => Number(/-(\d+)$/.exec(record.id)?.[1]) || 0)
+    store.seq = Math.max(Number(store.config.sequence) || 0, dbMaxSeq(), counts.executions + counts.audits + counts.tasks + counts.users, ...configIds)
     return store.executions.length > 0 || store.audits.length > 0
   } catch (e) {
     throw new Error('Cannot load persisted data: ' + e.message)
@@ -105,6 +114,7 @@ export function loadStore() {
 }
 
 export function saveStore() {
+  store.config.sequence = store.seq
   dbSaveAll(store)
 }
 

@@ -1,6 +1,7 @@
 import './env.js'
 import { db } from './db.js'
 import { consumeModelCall, withModelSlot, requestContext } from './limits.js'
+import { flushPersistence, persistenceContext } from './persistence-context.js'
 const defaults = { geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-lite-latest' }
 const savedSettings = JSON.parse(db.prepare("SELECT value FROM config WHERE key = 'runtime'").get()?.value || '{}')
 let settings = { ...defaults, geminiModel: savedSettings.geminiModel || defaults.geminiModel }
@@ -13,6 +14,12 @@ function refresh() {
   MODEL = settings.geminiModel
 }
 refresh()
+export function reloadRuntime() {
+  const saved = JSON.parse(db.prepare("SELECT value FROM config WHERE key = 'runtime'").get()?.value || '{}')
+  settings = { ...defaults, geminiModel: saved.geminiModel || defaults.geminiModel }
+  refresh()
+  if (persistenceContext.getStore()) persistenceContext.getStore().runtime = { source: MODE, model: MODEL }
+}
 export function runtimeStatus() {
   return { ...settings, provider: 'gemini', mode: MODE, model: MODEL, providers: [{ id: 'gemini', configured: !!key() && !/^(your-|replace|example)/i.test(key()) }], lastCheck: JSON.parse(db.prepare("SELECT value FROM config WHERE key = 'runtimeCheck'").get()?.value || 'null') }
 }
@@ -27,7 +34,7 @@ export function updateRuntime(patch) {
 export function requireRuntime() {
   if (runtimeProvenance().source === 'unconfigured') throw Object.assign(new Error('Set GEMINI_API_KEY in .env and restart the backend.'), { status: 503 })
 }
-export function runtimeProvenance() { return requestContext.getStore()?.runtime || { source: MODE, model: MODEL } }
+export function runtimeProvenance() { return requestContext.getStore()?.runtime || persistenceContext.getStore()?.runtime || { source: MODE, model: MODEL } }
 export function withRuntimeContext(work) {
   if (requestContext.getStore()?.runtime) return work()
   return requestContext.run({ ...requestContext.getStore(), runtime: runtimeProvenance() }, work)
@@ -63,6 +70,7 @@ export async function generateResult(prompt, { persona, json = false, maxOutputT
   requireRuntime()
   const { source, model } = runtimeProvenance()
   consumeModelCall()
+  await flushPersistence()
   const body = {
     ...(persona ? { systemInstruction: { parts: [{ text: persona }] } } : {}), contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: { temperature, maxOutputTokens, ...(json ? { responseMimeType: 'application/json' } : {}) },

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readdirSync, rmSync, rmdirSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, rmdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -43,4 +43,20 @@ test('production server starts without credentials and serves SPA deep links', {
     for (const filename of readdirSync(directory)) rmSync(join(directory, filename))
     rmdirSync(directory)
   }
+})
+
+test('Vercel cold start exports an API handler without creating local database files', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'onlyagent-vercel-start-'))
+  const dataPath = join(directory, 'must-not-be-created')
+  const child = spawn(process.execPath, ['--input-type=module', '-e', "const { default: handler } = await import('./api/[...path].js'); const { db, dbCounts } = await import('./server/db.js'); if (typeof handler !== 'function' || dbCounts().tasks !== 0) process.exitCode=1; db.close();"], {
+    env: { ...process.env, VERCEL: '1', NODE_ENV: 'production', DATA_DIR: dataPath, GEMINI_API_KEY: '', BACKUP_ENABLED: 'true' },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  })
+  let errors = ''
+  child.stderr.on('data', chunk => { errors += chunk.toString() })
+  try {
+    const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve) })
+    assert.equal(code, 0, errors)
+    assert.equal(existsSync(dataPath), false)
+  } finally { rmdirSync(directory) }
 })

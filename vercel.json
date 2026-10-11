@@ -4,6 +4,12 @@
   "installCommand": "npm ci --include=dev",
   "buildCommand": "node scripts/vercel-build.mjs",
   "outputDirectory": "dist",
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 300,
+      "includeFiles": "deployed.json"
+    }
+  },
   "rewrites": [
     { "source": "/app", "destination": "/index.html" },
     { "source": "/app/:path*", "destination": "/index.html" }

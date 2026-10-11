@@ -16,13 +16,26 @@ import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { migrateWalletIdentity } from './wallet-migration.js'
+import { persistenceContext, hosted } from './persistence-context.js'
 
 const DATA_DIR = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : fileURLToPath(new URL('../data', import.meta.url))
 const DB_FILE = `${DATA_DIR}/store.db`
 
-mkdirSync(DATA_DIR, { recursive: true })
+if (!hosted) mkdirSync(DATA_DIR, { recursive: true })
 
-export const db = new Database(DB_FILE)
+const localDb = new Database(hosted ? ':memory:' : DB_FILE)
+const currentDb = () => persistenceContext.getStore()?.db || localDb
+// Prepared statements must bind to the request's database, including statements
+// created during module initialization. No request reads another request's cache.
+export const db = new Proxy({}, {
+  get(_, property) {
+    if (property === 'prepare') return sql => new Proxy({}, {
+      get(_, method) { return (...args) => currentDb().prepare(sql)[method](...args) },
+    })
+    const value = currentDb()[property]
+    return typeof value === 'function' ? value.bind(currentDb()) : value
+  },
+})
 db.pragma('journal_mode = WAL')
 
 // ---------------------------------------------------------------------------
@@ -169,6 +182,7 @@ export function archiveUnverifiedActivity() {
   const counts = Object.fromEntries(activityTables.map((table) => [table,
     db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE source IS NULL`).get().c]))
   if (!Object.values(counts).some(Boolean)) return null
+  if (hosted) throw new Error('Hosted history contains unverified records. Archive them locally before importing.')
   const archive = `${DATA_DIR}/unverified-history-${Date.now()}.db`
   db.prepare('VACUUM INTO ?').run(archive)
   db.transaction(() => {
@@ -308,6 +322,36 @@ export function dbSaveAll({ users, agents, executions, audits, tasks, config, fe
     }
   })
   tx()
+  persistenceContext.getStore()?.checkpoint?.()
+}
+
+export function exportDatabase(database = currentDb()) {
+  const names = database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()
+  return { tables: Object.fromEntries(names.map(({ name }) => [name, database.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all()])) }
+}
+
+export function createWorkingDatabase(snapshot) {
+  const database = new Database(':memory:')
+  try {
+    // Rebuild schema, rather than deserializing a WAL-mode file whose journal
+    // header can require a filesystem even when its bytes are in memory.
+    const schema = localDb.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END").all()
+    for (const { sql } of schema) database.exec(sql)
+    const template = exportDatabase(database)
+    database.transaction(() => {
+      for (const name of Object.keys(template.tables)) database.exec(`DELETE FROM "${name}"`)
+      for (const [name, rows] of Object.entries(snapshot?.tables || {})) {
+        if (!Object.hasOwn(template.tables, name)) throw new Error('The hosted database contains an unsupported table. Update the application before importing it.')
+        const allowed = new Set(database.prepare(`PRAGMA table_info("${name}")`).all().map(column => column.name))
+        for (const row of rows) {
+          const columns = Object.keys(row)
+          if (!columns.length || columns.some(column => !allowed.has(column))) throw new Error('The hosted database schema does not match this application version.')
+          database.prepare(`INSERT INTO "${name}" (${columns.map(column => `"${column}"`).join(',')}) VALUES (${columns.map(() => '?').join(',')})`).run(...columns.map(column => row[column]))
+        }
+      }
+    })()
+    return database
+  } catch (error) { database.close(); throw error }
 }
 
 export function dbLoadAll() {

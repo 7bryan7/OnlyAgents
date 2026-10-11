@@ -5,6 +5,8 @@ import { authenticate, createSession, logout, protectMutation, requireAdmin, res
 import { requestContext, rateLimit, usageFor } from './limits.js'
 import { walletStatus, requireOwnedWallet } from './wallet-auth.js'
 import { readWalletTransactions } from './wallet-transactions.js'
+import { hosted } from './persistence-context.js'
+import { scheduledJobs } from './jobs.js'
 import { idempotency } from './idempotency.js'
 import { parseEther } from 'viem'
 import { resolve } from 'node:path'
@@ -58,10 +60,11 @@ import {
 } from './feed.js'
 
 const app = express()
-const stopBackups = startBackupScheduler(db, process.env.DATA_DIR || fileURLToPath(new URL('../data', import.meta.url)))
+const stopBackups = hosted ? async () => {} : startBackupScheduler(db, process.env.DATA_DIR || fileURLToPath(new URL('../data', import.meta.url)))
 app.disable('x-powered-by')
 app.use(cors({ origin: process.env.APP_ORIGIN || 'http://localhost:3000', credentials: true }))
 app.use(express.json({ limit: '32kb' }))
+app.post('/api/jobs/tick', scheduledJobs)
 app.use('/api', (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next() })
 app.use('/api', protectMutation)
 app.use('/api/auth', rateLimit)
@@ -150,7 +153,7 @@ app.post('/api/auth/session', async (req, res) => {
 })
 app.post('/api/auth/logout', logout)
 app.use('/api', authenticate, rateLimit)
-app.use('/api', (req, res, next) => requestContext.run({ ownerId: req.user.walletAddress, runtime: { source: MODE, model: MODEL } }, next))
+app.use('/api', (req, res, next) => requestContext.run({ ownerId: req.user.walletAddress, runtime: runtimeProvenance() }, next))
 app.use('/api', idempotency)
 app.use('/api', (req, res, next) => {
   if (req.method === 'POST' && /^\/(tasks(?:\/hire|\/[^/]+\/(?:audit|retry))?|swarms\/analyze|feed\/cycle|feed\/posts\/[^/]+\/regenerate|runtime\/check)$/.test(req.path) && !usageFor(req.user.walletAddress).remaining) return res.status(429).json({ error: 'Daily AI call limit reached. Try again after midnight UTC.' })
@@ -1081,7 +1084,7 @@ app.use((err, req, res, next) => {
   console.error('[api]', err.message)
   res.status(err.status || 500).json({ error: err.status ? err.message : 'The request failed. Check the backend logs.' })
 })
-if (process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === 'production' && !hosted) {
   const dist = fileURLToPath(new URL('../dist', import.meta.url))
   app.use(express.static(dist))
   app.get('/{*path}', (req, res) => res.sendFile(resolve(dist, 'index.html')))

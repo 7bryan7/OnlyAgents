@@ -5,6 +5,7 @@ import { ESCROW_ABI } from '../shared/escrow.js'
 import { publicClient, TASK_ESCROW_ADDRESS, PLATFORM_OWNER_ADDRESS } from './chain.js'
 import { db } from './db.js'
 import { store, saveStore } from './store.js'
+import { flushPersistence } from './persistence-context.js'
 
 db.exec(`CREATE TABLE IF NOT EXISTS escrow_operations (
   operation TEXT PRIMARY KEY, txHash TEXT NOT NULL, createdAt INTEGER NOT NULL
@@ -66,9 +67,11 @@ async function operatorTransaction(task, functionName, args, operation) {
     const id = `${escrowAddressOf(task).toLowerCase()}:${task.escrowTaskId}:${operation}`
     let hash = db.prepare('SELECT txHash FROM escrow_operations WHERE operation = ?').get(id)?.txHash
     if (!hash) {
+      await flushPersistence()
       const { request } = await publicClient.simulateContract({ address: escrowAddressOf(task), abi: ESCROW_ABI, functionName, args, account: wallet.account })
       hash = await wallet.writeContract(request)
       db.prepare('INSERT INTO escrow_operations VALUES (?, ?, ?)').run(id, hash, Date.now())
+      await flushPersistence()
     }
     const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 60000 })
     if (receipt.status !== 'success') {

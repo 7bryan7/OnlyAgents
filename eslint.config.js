@@ -36,7 +36,7 @@ export default [
   },
   {
     // Server runs in Node — provide Node globals (process, etc.)
-    files: ['server/**/*.js', 'tests/**/*.js', 'playwright.config.js'],
+    files: ['server/**/*.js', 'api/**/*.js', 'tests/**/*.js', 'playwright.config.js'],
     languageOptions: { globals: globals.node },
   },
 ]
