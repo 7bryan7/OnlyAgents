@@ -133,7 +133,7 @@ test('interrupted work becomes durably recoverable and config receipt IDs remain
 })
 
 test('hosted HTTP wallet sessions persist before acknowledgement, reject private history access, and protect cron', async t => {
-  const { default: handler } = await import('../server/vercel-handler.js')
+  const { default: handler } = await import('../api/index.js')
   process.env.SUPABASE_URL = 'https://fixture.supabase.co'
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'fixture-server-key'
   process.env.APP_ORIGIN = 'https://onlyagent-fixture.vercel.app'
@@ -161,6 +161,9 @@ test('hosted HTTP wallet sessions persist before acknowledgement, reject private
     })
   }
   try {
+    const health = await call('/api/index?__oa_path=health')
+    assert.equal(health.status, 200)
+    assert.equal(typeof (await health.json()).executions, 'number')
     const challenge = await (await call('/api/auth/challenge', { walletAddress: account.address })).json()
     assert.match(challenge.message, /https:\/\/onlyagent-fixture.vercel.app/)
     const signature = await account.signMessage({ message: challenge.message })
@@ -175,7 +178,7 @@ test('hosted HTTP wallet sessions persist before acknowledgement, reject private
     assert.equal((await (await call('/api/auth/me', undefined, cookie)).json()).user.walletAddress, account.address.toLowerCase())
     assert.equal((await call('/api/tasks/tk-0042', undefined, cookie)).status, 404)
     assert.equal((await call('/api/jobs/tick', {})).status, 401)
-    const job = await call('/api/jobs/tick', {}, '', `Bearer ${process.env.CRON_SECRET}`)
+    const job = await call('/api/index?__oa_path=jobs%2Ftick', {}, '', `Bearer ${process.env.CRON_SECRET}`)
     assert.equal(job.status, 200)
     assert.equal((await job.json()).kind, 'idle')
     assert.equal((await call('/api/auth/logout', {}, cookie)).status, 200)

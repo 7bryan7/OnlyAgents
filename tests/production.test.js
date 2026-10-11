@@ -48,7 +48,7 @@ test('production server starts without credentials and serves SPA deep links', {
 test('Vercel cold start exports an API handler without creating local database files', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'onlyagent-vercel-start-'))
   const dataPath = join(directory, 'must-not-be-created')
-  const child = spawn(process.execPath, ['--input-type=module', '-e', "const { default: handler } = await import('./api/[...path].js'); const { db, dbCounts } = await import('./server/db.js'); if (typeof handler !== 'function' || dbCounts().tasks !== 0) process.exitCode=1; db.close();"], {
+  const child = spawn(process.execPath, ['--input-type=module', '-e', "const { default: handler } = await import('./api/index.js'); const { db, dbCounts } = await import('./server/db.js'); if (typeof handler !== 'function' || dbCounts().tasks !== 0) process.exitCode=1; db.close();"], {
     env: { ...process.env, VERCEL: '1', NODE_ENV: 'production', DATA_DIR: dataPath, GEMINI_API_KEY: '', BACKUP_ENABLED: 'true' },
     stdio: ['ignore', 'ignore', 'pipe'],
   })

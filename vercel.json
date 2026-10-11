@@ -11,6 +11,7 @@
     }
   },
   "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index?__oa_path=:path*" },
     { "source": "/app", "destination": "/index.html" },
     { "source": "/app/:path*", "destination": "/index.html" }
   ]

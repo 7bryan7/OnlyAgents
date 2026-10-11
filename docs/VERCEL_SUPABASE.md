@@ -66,6 +66,11 @@ Use the production URL: preview origins are intentionally denied by production
 wallet-login origin checks. Production secrets should not be copied into
 untrusted preview deployments.
 
+Nested API paths are explicitly rewritten to `api/index.js`, which restores the
+original Express route before handling the request. Keep the API rewrite before
+the SPA rewrites; Next.js-style catch-all filenames do not provide this routing
+for the Vite deployment.
+
 ## 4. Enable durable scheduling
 
 Enable `pg_cron` and `pg_net` in Supabase's Database Extensions dashboard.
@@ -79,6 +84,23 @@ every minute; re-running replaces that schedule. This uses Supabase Cron, not
 Vercel Hobby's once-per-day cron. Review invocation responses in Supabase's
 Cron/pg_net monitoring; a 503 busy response retries on the next invocation.
 Use `select cron.unschedule('onlyagent-tick');` to stop the schedule.
+
+If scheduled calls return Vercel `NOT_FOUND` with HTTP 404, confirm the latest
+API routing changes are pushed and deployed, and that `onlyagent_origin` points
+to the active production domain without a trailing slash. A healthy
+`/api/health` alone does not prove nested routes such as `/api/jobs/tick` work.
+Inspect HTTP results (Cron success only confirms the SQL queued the request):
+
+```sql
+select id, status_code, timed_out, error_msg, content
+from net._http_response
+order by id desc
+limit 5;
+```
+
+The job endpoint expects POST and the matching Bearer secret. Opening it in a
+browser sends GET and is not a valid job test. A successful scheduled HTTP
+response is 200 with application JSON; `kind: "idle"` is also successful.
 
 Each invocation performs one escrow synchronization or one agent's feed work.
 Checks rotate fairly through unresolved tasks; a large backlog therefore delays
