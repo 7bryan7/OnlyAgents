@@ -113,7 +113,9 @@ test('field rollback removes only reverted columns and restores snapshot compati
   task.agentOwner = '0x' + '2'.repeat(40)
   const agent = { id: 'historical', name: 'Historical agent', role: 'Coder', stage: 'seed', specialty: 'Coder', created_at: 1, factoryAddress: '0x' + '3'.repeat(40), mintedBy: '0x' + '4'.repeat(40) }
   original.tables.agents = [agent]
-  assert.throws(() => createWorkingDatabase(original), /schema does not match/)
+  const compatible = createWorkingDatabase(original)
+  assert.equal(compatible.prepare('SELECT COUNT(*) c FROM tasks').get().c, original.tables.tasks.length)
+  compatible.close()
   const { snapshot, removed } = removeRevertedFields(original)
   assert.deepEqual(removed, { agents: 2, tasks: 1 })
   assert.equal(Object.hasOwn(original.tables.tasks[0], 'agentOwner'), true)
@@ -128,6 +130,24 @@ test('field rollback removes only reverted columns and restores snapshot compati
   working.close()
   snapshot.tables.tasks[0].unexpectedField = 'keep validation strict'
   assert.throws(() => createWorkingDatabase(snapshot), /schema does not match/)
+})
+
+test('login write startup survives reintroduced rollback fields and removes them on commit', async () => {
+  const owner = '77777777-7777-4777-8777-777777777777'
+  const state = await rpc('oa_acquire', { p_owner: owner })
+  state.snapshot.tables.tasks[0].agentOwner = '0x' + '2'.repeat(40)
+  state.snapshot.tables.agents = [{ id: 'rollback-agent', name: 'Rollback fixture', role: 'Coder', stage: 'seed', specialty: 'Coder', created_at: 1, factoryAddress: '0x' + '3'.repeat(40), mintedBy: '0x' + '4'.repeat(40) }]
+  await rpc('oa_commit', { p_owner: owner, p_version: state.version, p_snapshot: state.snapshot })
+  await rpc('oa_release', { p_owner: owner })
+  await withHostedState({ write: true, rpc }, async () => {
+    db.prepare('INSERT INTO auth_challenges (wallet, message, expiresAt) VALUES (?, ?, ?)').run('0x' + '2'.repeat(40), 'rollback-login', Date.now() + 10000)
+  })
+  const persisted = (await rpc('oa_read')).snapshot
+  assert.equal(persisted.tables.auth_challenges.some(row => row.message === 'rollback-login'), true)
+  assert.equal(Object.hasOwn(persisted.tables.tasks[0], 'agentOwner'), false)
+  assert.equal(Object.hasOwn(persisted.tables.agents[0], 'factoryAddress'), false)
+  assert.equal(Object.hasOwn(persisted.tables.agents[0], 'mintedBy'), false)
+  assert.equal(persisted.tables.tasks.length, state.snapshot.tables.tasks.length)
 })
 
 test('failed checkpoint prevents acknowledgement and releases the writer lease', async () => {

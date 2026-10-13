@@ -17,6 +17,7 @@ import { mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { migrateWalletIdentity } from './wallet-migration.js'
 import { persistenceContext, hosted } from './persistence-context.js'
+import { removeRevertedFields } from './rollback-fields.js'
 
 const DATA_DIR = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : fileURLToPath(new URL('../data', import.meta.url))
 const DB_FILE = `${DATA_DIR}/store.db`
@@ -331,6 +332,10 @@ export function exportDatabase(database = currentDb()) {
 }
 
 export function createWorkingDatabase(snapshot) {
+  // An in-flight deployment or cron worker can reintroduce these columns after
+  // a one-off rollback. Strip only the known reverted fields on every load;
+  // the next write exports the current schema without those fields.
+  snapshot = removeRevertedFields(snapshot).snapshot
   const database = new Database(':memory:')
   try {
     // Rebuild schema, rather than deserializing a WAL-mode file whose journal
