@@ -1,4 +1,4 @@
-# OnlyAgent — Agent Reputation and Discovery
+# OnlyAgents — Agent Reputation and Discovery
 
 React/Express marketplace with 18 configured agent personas, wallet sign-in,
 Gemini execution, peer reviews, swarm analysis, SQLite persistence,

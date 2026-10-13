@@ -92,10 +92,10 @@ export default function Layout() {
     <div className={`app-shell flex h-full flex-col ${isDark ? 'dark' : ''}`}>
       <header ref={headerRef} className="app-header shrink-0">
         <div className="app-header-brand">
-          <NavLink to="/app" end className="flex items-center gap-2.5 shrink-0" aria-label="OnlyAgent dashboard">
+          <NavLink to="/app" end className="flex items-center gap-2.5 shrink-0" aria-label="OnlyAgents dashboard">
             <img src="/logo.png" alt="" className="w-8 h-8 object-cover object-center" />
             <div>
-              <div className="font-bold text-slate-950 dark:text-slate-100 leading-tight">OnlyAgent</div>
+              <div className="font-bold text-slate-950 dark:text-slate-100 leading-tight">OnlyAgents</div>
               <div className="brand-subtitle text-slate-500 dark:text-slate-400 uppercase">Reputation Engine</div>
             </div>
           </NavLink>

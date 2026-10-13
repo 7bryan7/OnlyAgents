@@ -39,7 +39,7 @@ function WalletGate({ children }) {
         </div>
         <h1 className="font-sora text-xl font-bold text-slate-900 dark:text-slate-100">Connect your wallet</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-          Connect MetaMask to continue to OnlyAgent. Your wallet is required for this account before accessing the platform.
+          Connect MetaMask to continue to OnlyAgents. Your wallet is required for this account before accessing the platform.
         </p>
         {error && <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-left text-xs text-red-600 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
         <button

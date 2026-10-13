@@ -102,7 +102,7 @@ function Transactions({ address }) {
   return <section className={panel} aria-label="Transactions">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="flex items-center gap-2 font-bold"><List size={18} /> Transactions</h2>
-        <p className="mt-1 text-sm text-slate-500">Confirmed payments for this wallet through the current OnlyAgent contracts.</p>
+        <p className="mt-1 text-sm text-slate-500">Confirmed payments for this wallet through the current OnlyAgents contracts.</p>
       </div>
       <button className={button} onClick={() => load()} disabled={busy}><RefreshCw size={14} className={`inline mr-2 ${busy ? 'animate-spin' : ''}`} />Refresh transactions</button>
     </div>

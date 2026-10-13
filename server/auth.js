@@ -25,7 +25,7 @@ export function walletLoginChallenge(req, res) {
   try {
     const wallet = addressOf(req.body?.walletAddress)
     const expiresAt = Date.now() + 5 * 60000
-    const message = `OnlyAgent wallet sign-in\nOrigin: ${process.env.APP_ORIGIN || 'http://localhost:3000'}\nWallet: ${wallet}\nNonce: ${randomBytes(24).toString('hex')}\nExpires: ${new Date(expiresAt).toISOString()}\nSign this message to start your OnlyAgent session. It does not authorize a payment.`
+    const message = `OnlyAgents wallet sign-in\nOrigin: ${process.env.APP_ORIGIN || 'http://localhost:3000'}\nWallet: ${wallet}\nNonce: ${randomBytes(24).toString('hex')}\nExpires: ${new Date(expiresAt).toISOString()}\nSign this message to start your OnlyAgents session. It does not authorize a payment.`
     db.prepare('INSERT INTO auth_challenges VALUES (?, ?, ?) ON CONFLICT(wallet) DO UPDATE SET message=excluded.message, expiresAt=excluded.expiresAt').run(wallet, message, expiresAt)
     res.json({ message, expiresAt })
   } catch (e) { res.status(e.status || 400).json({ error: e.message }) }

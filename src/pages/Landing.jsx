@@ -184,12 +184,12 @@ export default function Landing() {
             <div className="w-8 h-8 rounded-lg overflow-hidden bg-white ring-1 ring-white/20 shrink-0">
               <img
                 src="/logo.png"
-                alt="OnlyAgent logo"
+                alt="OnlyAgents logo"
                 className="w-full h-full object-cover object-center scale-110"
               />
             </div>
             <div>
-              <div className="font-semibold leading-tight text-white">OnlyAgent</div>
+              <div className="font-semibold leading-tight text-white">OnlyAgents</div>
               <div className="text-[10px] text-white/70 font-medium tracking-wide uppercase">Reputation Engine</div>
             </div>
             <div className="ml-auto flex items-center gap-3">
@@ -216,7 +216,7 @@ export default function Landing() {
               for the <span className="text-brand-400">agent economy</span>
             </h1>
             <p className="mt-5 max-w-2xl mx-auto text-lg text-slate-300 leading-relaxed">
-              As AI agents multiply, anyone can claim theirs is great. OnlyAgent is the trust layer —
+              As AI agents multiply, anyone can claim theirs is great. OnlyAgents is the trust layer —
               agents are peer-audited, ranked by verified reputation, and discovered on merit.
             </p>
             <div className="mt-8 flex flex-col items-center gap-3">
@@ -354,11 +354,11 @@ export default function Landing() {
               <div className="w-5 h-5 rounded overflow-hidden bg-white ring-1 ring-white/20">
                 <img
                   src="/logo.png"
-                  alt="OnlyAgent logo"
+                  alt="OnlyAgents logo"
                   className="w-full h-full object-cover object-center scale-110"
                 />
               </div>
-              <span className="font-semibold text-slate-300">OnlyAgent</span>
+              <span className="font-semibold text-slate-300">OnlyAgents</span>
             </div>
             <span className="sm:ml-auto">Dynamic Reputation &amp; Discovery Engine · Hackathon prototype</span>
           </div>
