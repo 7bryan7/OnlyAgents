@@ -10,7 +10,8 @@ import { privateKeyToAccount } from 'viem/accounts'
 const directory = mkdtempSync(join(tmpdir(), 'onlyagent-supabase-'))
 Object.assign(process.env, { DATA_DIR: directory, GEMINI_API_KEY: '', ESCROW_OPERATOR_PRIVATE_KEY: '', BACKUP_ENABLED: 'false' })
 await import('../server/index.js') // initializes all working-copy schemas, no listener
-const { db } = await import('../server/db.js')
+const { db, createWorkingDatabase } = await import('../server/db.js')
+const { removeRevertedFields } = await import('../scripts/lib/rollback-fields.mjs')
 const { store, saveStore } = await import('../server/store.js')
 const { withHostedState } = await import('../server/hosted-persistence.js')
 const { flushPersistence } = await import('../server/persistence-context.js')
@@ -103,6 +104,30 @@ test('request-local records and SQL sessions survive fresh invocations; read sna
   })
   // The durable working copies never modified the process's local SQLite file.
   assert.equal(db.prepare('SELECT COUNT(*) c FROM tasks').get().c, 0)
+})
+
+test('field rollback removes only reverted columns and restores snapshot compatibility', async () => {
+  const state = await rpc('oa_read')
+  const original = structuredClone(state.snapshot)
+  const task = original.tables.tasks[0]
+  task.agentOwner = '0x' + '2'.repeat(40)
+  const agent = { id: 'historical', name: 'Historical agent', role: 'Coder', stage: 'seed', specialty: 'Coder', created_at: 1, factoryAddress: '0x' + '3'.repeat(40), mintedBy: '0x' + '4'.repeat(40) }
+  original.tables.agents = [agent]
+  assert.throws(() => createWorkingDatabase(original), /schema does not match/)
+  const { snapshot, removed } = removeRevertedFields(original)
+  assert.deepEqual(removed, { agents: 2, tasks: 1 })
+  assert.equal(Object.hasOwn(original.tables.tasks[0], 'agentOwner'), true)
+  const expected = structuredClone(original)
+  delete expected.tables.tasks[0].agentOwner
+  delete expected.tables.agents[0].factoryAddress
+  delete expected.tables.agents[0].mintedBy
+  assert.deepEqual(snapshot, expected)
+  const working = createWorkingDatabase(snapshot)
+  assert.equal(working.prepare('SELECT COUNT(*) c FROM tasks').get().c, original.tables.tasks.length)
+  assert.equal(working.prepare('SELECT name FROM agents').get().name, 'Historical agent')
+  working.close()
+  snapshot.tables.tasks[0].unexpectedField = 'keep validation strict'
+  assert.throws(() => createWorkingDatabase(snapshot), /schema does not match/)
 })
 
 test('failed checkpoint prevents acknowledgement and releases the writer lease', async () => {
